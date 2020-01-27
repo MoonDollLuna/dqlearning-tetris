@@ -1,4 +1,9 @@
-# Aplicación de Deep Reinforcement Learning a un juego real
+# TFG - Aplicación de Deep Reinforcement Learning a un juego real
+
+## Autora: Luna Jiménez Fernández
+
+### Rama: Computación
+### Departamento: Sistemas Informáticos - Escuela Superior de Ingeniería Informática (Albacete) - Universidad de Castilla-La Mancha (UCLM)
 
 Este trabajo está fundamentado en aprendizaje automático, y en concreto, mediante el uso de técnicas
 ‘deep’, que actualmente experimentan un gran auge en el mundo científico y tecnológico. En particular, se
