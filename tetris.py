@@ -244,11 +244,12 @@ def get_shape():
     return Piece(5, 0, random.choice(shapes))
 
 
+# TODO: ESTA FUNCION SE PUEDE READAPTAR
 def draw_text_middle(surface, text, size, color):
     font = pygame.font.SysFont("comicsans", size, bold=True)
     label = font.render(text, 1, color)
 
-    surface.blit(label, (top_left_x + play_width/2 - (label.get_width()/2)), top_left_y + play_height/2 - (label.get_height()/2))
+    surface.blit(label, (top_left_x + play_width/2 - (label.get_width()/2), top_left_y + play_height/2 - (label.get_height()/2)))
 
 
 # Draws the grid on the playzone
@@ -344,7 +345,7 @@ def main(win):
     
     locked_positions = {}
     # TODO: ESTO ASI NO ME LUCE
-    high_score = max_score()
+    #high_score = max_score()
 
     change_piece = False
     run = True
@@ -408,7 +409,11 @@ def main(win):
 
                 # Caida rapida
                 if event.key == pygame.K_UP:
-                    pass
+                    # TODO: Comentar mejor?
+                    while valid_space(current_piece, grid):
+                        current_piece.y += 1
+
+                    current_piece.y -= 1
 
                 if event.key == pygame.K_r:
                     current_piece.rotation += 1
@@ -441,10 +446,14 @@ def main(win):
         if check_lost(locked_positions):
             # TODO: AJUSTA ESTO QUE NO ME CONVENCE
             draw_text_middle(win, "GAME OVER", 80, (255, 255, 255))
-            pygame.display.quit()
             pygame.time.delay(1500)
             run = False
-            update_score(score)
+
+            pygame.display.quit()
+            pygame.quit()
+            sys.exit()
+            # update_score(score)
+
 
 def main_menu(win):
     run = True
