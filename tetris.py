@@ -1,9 +1,13 @@
+# CODE BY: Luna Jiménez Fernández
+# Based on the following tutorial:
+# https://techwithtim.net/tutorials/game-development-with-python/tetris-pygame/tutorial-1/
+
+# Imports
 import pygame
 import random
 import sys
-
-# Based on the following tutorial:
-# https://techwithtim.net/tutorials/game-development-with-python/tetris-pygame/tutorial-1/
+import argparse
+import copy
 
 # creating the data structure for pieces
 # setting up global vars
@@ -20,26 +24,27 @@ shapes: S, Z, I, O, J, L, T
 represented in order by 0 - 6
 """
 
-pygame.font.init()
-
-# TODO: variables globales en mayus?
-# Global variables
+####################
+# Global variables #
+####################
 
 # Window size
-s_width = 800
-s_height = 700
-
-# Playzone size
-play_width = 300  # 300 // 10 = 30 width per block
-play_height = 600  # 600 // 20 = 30 height per block
-
-# Playzone position
-top_left_x = (s_width - play_width) // 2
-top_left_y = s_height - play_height
+screen_width = 700
+screen_height = 800
 
 # Block size
-block_size = 30
+block_size = 40
 
+# Playzone size
+play_width = 10 * block_size # 10 block-wide playzone
+play_height = 20 * block_size # 20 block-high playzone
+
+# Playzone position
+top_left_x = 20 + block_size // 2
+top_left_y = 0
+
+# Path to the font
+font_path = "./fonts/ARCADE_N.TTF"
 
 # Tetramino representation
 
@@ -71,8 +76,8 @@ I = [['..0..',
       '..0..',
       '.....'],
      ['.....',
-      '0000.',
       '.....',
+      '0000.',
       '.....',
       '.....']]
 
@@ -145,9 +150,18 @@ T = [['.....',
       '..0..',
       '.....']]
 
+# List with all the shapes
 shapes = [S, Z, I, O, J, L, T]
-shape_colors = [(0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 255, 0), (255, 165, 0), (0, 0, 255), (128, 0, 128)]
-# index 0 - 6 represent shape
+
+# Used colors
+shape_colors = [(0, 240, 0), (240, 0, 0), (0, 240, 240), (240, 240, 0), (240, 160, 0), (0, 0, 240), (160, 0, 240)]
+background_color = (170, 170, 170)
+piece_border_color = (0, 0, 0)
+playground_border_color = (75, 75, 75)
+
+#####################
+# CLASS DEFINITIONS #
+#####################
 
 
 class Piece(object):
@@ -159,34 +173,198 @@ class Piece(object):
         self.rotation = 0
 
 
-# TODO: ESTO ES SUPER CUTRE!!!!!
-def max_score():
-    with open('scores.txt', 'r') as f:
-        lines = f.readlines()
-        score = lines[0].strip
+#####################
+# GRAPHICAL METHODS #
+#####################
 
-    return score
+def draw_manager(surface, grid, current_shape, next_shape, score=0, level=0, lines=0):
+    """
+    Draws all the elements on the screen.
+
+    :param surface: Surface used to hold all elements.
+    :param grid: Matrix containing the current state of the playzone.
+    :param current_shape: Shape to be drawn with a shadow drop.
+    :param grid: Grid containing all the fixed blocks.
+    :param next_shape: Shape to be drawn on the NEXT SHAPE screen
+    :param score: Current score of the player.
+    :param level: Current level of the game.
+    :param lines: Current lines cleared by the player.
+    """
+
+    # Fill the background with black
+    surface.fill((15, 15, 15))
+
+    # Draw the playzone
+    draw_playzone(surface, grid)
+
+    # Draws the shadow drop
+    draw_shadow_drop(surface, current_shape, grid)
+
+    # Draw the next piece
+    draw_next_shape(surface, next_shape)
+
+    # Draw the rest of the hud
+    draw_hud(surface, score, level, lines)
 
 
-# TODO: CUUUUUTREEEEEEEEEEEEE
-def update_score(nscore):
+def draw_playzone(surface, grid):
+    """
+    Draws the playzone (the cells and all the blocks on it)
 
-    score = max_score()
+    :param surface: Surface used to hold the playzone.
+    :param grid: Matrix containing the current state of the playzone.
+    """
 
-    with open('scores.txt', 'w') as f:
-        if int(score) > nscore:
-            f.write(str(score))
-        else:
-            f.write(str(nscore))
+    # For each block in the grid
+    for i in range(len(grid)):
+        for j in range(len(grid[i])):
+            # Draw the block in the appropiate color
+            pygame.draw.rect(surface, grid[i][j], (top_left_x + j * block_size, top_left_y + i * block_size, block_size, block_size), 0)
+            # If not background, draw the border
+            if grid[i][j] != background_color:
+                pygame.draw.rect(surface, piece_border_color, (top_left_x + j * block_size, top_left_y + i * block_size, block_size, block_size), 1)
 
+    # Draws two borders around the playground
+    pygame.draw.rect(surface, playground_border_color, (20, 0, block_size // 2, screen_height), 0)
+    pygame.draw.rect(surface, playground_border_color, (top_left_x + play_width, 0, block_size // 2, screen_height), 0)
+
+
+def draw_shadow_drop(surface, shape, grid):
+    """
+    Draws the shadow drop of the current piece (where it would fall if you hard dropped it right now)
+
+    :param surface: Surface to draw the shape on.
+    :param shape: Shape to be drawn.
+    :param grid: Grid containing all the fixed blocks.
+    """
+
+    # TODO: ESTO NO VA Y NO TENGO CLARO POR QUE
+    # Clone the shape
+    shadow_shape = copy.deepcopy(shape)
+
+    # Find the position where the piece would be
+    while valid_space(shadow_shape, grid):
+        shadow_shape.y += 1
+    shadow_shape.y -= 1
+
+    # Draw all the blocks in the appropiate color
+    for position in convert_shape_format(shadow_shape):
+        pygame.draw.rect(surface, shadow_shape.color, (top_left_x + position[0] * block_size, top_left_y + position[1] * block_size, block_size, block_size), 5)
+
+
+def draw_next_shape(surface, shape):
+    """
+    Draws the next expected shape in the HUD
+
+    :param surface: Surface to draw the shape on.
+    :param shape: Shape to be drawn.
+    """
+
+    # Identify where to place the shapes
+    hud_begin_x = top_left_x + play_width + 30
+    hud_begin_y = 480
+
+    # Draw a rectangle to contain the title
+    pygame.draw.rect (surface, background_color, (hud_begin_x, hud_begin_y + 20, screen_width - hud_begin_x - 10, 60), 0)
+    pygame.draw.rect(surface, playground_border_color, (hud_begin_x, hud_begin_y + 20, screen_width - hud_begin_x - 10, 60), 5)
+
+    # Draw the title and place it
+    font = pygame.font.Font(font_path, 20)
+    text = font.render('NEXT SHAPE', 1, (0, 0, 0))
+    surface.blit(text, (hud_begin_x + (screen_width - hud_begin_x - 10) // 2 - text.get_width() / 2, hud_begin_y + 50 - text.get_height() / 2))
+
+    # Draw a rectangle to contain the shape below
+    pygame.draw.rect(surface, background_color, (hud_begin_x + 10, hud_begin_y + 90, screen_width - hud_begin_x - 30, 180), 0)
+    pygame.draw.rect(surface, playground_border_color, (hud_begin_x + 10, hud_begin_y + 90, screen_width - hud_begin_x - 30, 180), 5)
+
+    # Draws the shape
+    sx = top_left_x + play_width + 40
+    sy = hud_begin_y + 100
+
+    shape_format = shape.shape[shape.rotation % len(shape.shape)]
+
+    # TODO: POSIBLEMENTE SE PUEDE AJUSTAR ESTO
+    for i, line in enumerate(shape_format):
+        row = list(line)
+        for j, column in enumerate(row):
+            if column == '0':
+                pygame.draw.rect(surface, shape.color, (sx + j*block_size, sy + i * block_size, block_size, block_size), 0)
+                pygame.draw.rect(surface, piece_border_color, (sx + j * block_size, sy + i * block_size, block_size, block_size), 1)
+
+
+def draw_hud(surface, score, level, lines):
+    """
+    Draw the rest of the elements of the HUD (score, level, lines)
+
+    :param surface: Surface on which to draw the elements.
+    :param score: Current score of the player.
+    :param level: Current level of the player.
+    :param lines: Current amount of cleared lines by the player
+    """
+
+    # Identify where to place the HUD
+    hud_begin_x = top_left_x + play_width + 30
+
+    # Create the font
+    font = pygame.font.Font(font_path, 20)
+
+    # SCORE
+    score_y = 75
+
+    # Score uses its own font
+    score_font = pygame.font.Font(font_path, 30)
+
+    # Draw the rectangle
+    pygame.draw.rect(surface, background_color, (hud_begin_x - 10, score_y, screen_width - hud_begin_x + 10, 90), 0)
+    pygame.draw.rect(surface, playground_border_color, (hud_begin_x - 10, score_y, screen_width - hud_begin_x + 10, 90), 5)
+
+    # Write the text and print it
+    score_text = score_font.render('SCORE', 1, (0, 0, 0))
+    score_score = font.render(str(score), 1, (0, 0, 0))
+
+    surface.blit(score_text, (hud_begin_x + (screen_width - hud_begin_x - 10) // 2 - score_text.get_width() / 2, score_y + 30 - score_text.get_height() / 2))
+    surface.blit(score_score, (hud_begin_x + (screen_width - hud_begin_x - 10) // 2 - score_score.get_width() / 2, score_y + 65 - score_score.get_height() / 2))
+
+    # LEVEL
+    level_y = 250
+    # Draw the rectangle
+    pygame.draw.rect(surface, background_color, (hud_begin_x, level_y, screen_width - hud_begin_x - 10, 80), 0)
+    pygame.draw.rect(surface, playground_border_color, (hud_begin_x, level_y, screen_width - hud_begin_x - 10, 80), 5)
+
+    # Write the text and print it
+    level_text = font.render('LEVEL', 1, (0, 0, 0))
+    level_score = font.render(str(level), 1, (0, 0, 0))
+
+    surface.blit(level_text, (hud_begin_x + (screen_width - hud_begin_x - 10) // 2 - level_text.get_width() / 2, level_y + 25 - level_text.get_height() / 2))
+    surface.blit(level_score, (hud_begin_x + (screen_width - hud_begin_x - 10) // 2 - level_score.get_width() / 2, level_y + 55 - level_score.get_height() / 2))
+
+    # LINES
+    lines_y = 350
+    # Draw the rectangle
+    pygame.draw.rect(surface, background_color, (hud_begin_x, lines_y, screen_width - hud_begin_x - 10, 80), 0)
+    pygame.draw.rect(surface, playground_border_color, (hud_begin_x, lines_y, screen_width - hud_begin_x - 10, 80), 5)
+
+    # Write the text and print it
+    lines_text = font.render('LINES', 1, (0, 0, 0))
+    lines_score = font.render(str(lines), 1, (0, 0, 0))
+
+    surface.blit(lines_text, (hud_begin_x + (screen_width - hud_begin_x - 10) // 2 - lines_text.get_width() / 2,
+                              lines_y + 25 - lines_text.get_height() / 2))
+    surface.blit(lines_score, (hud_begin_x + (screen_width - hud_begin_x - 10) // 2 - lines_score.get_width() / 2,
+                               lines_y + 55 - lines_score.get_height() / 2))
+
+
+####################
+# GAMEPLAY METHODS #
+####################
 
 def create_grid(locked_positions={}):
     # Grid (playzone) is represented as a matrix of colours
     # Initially all colors (empty positions) are black
-    grid = [[(0, 0, 0) for _ in range(10)] for _ in range(20)]
+    grid = [[background_color for _ in range(10)] for _ in range(20)]
 
     # For all fixed blocks (locked positions), color the corresponding position
-    # to the appropiate color
+    # to the appropriate color
     for i in range(len(grid)):
         for j in range(len(grid[i])):
             if (j, i) in locked_positions:
@@ -216,7 +394,7 @@ def convert_shape_format(shape):
 
 
 def valid_space(shape, grid):
-    accepted_pos = [[(j, i) for j in range(10) if grid[i][j] == (0, 0, 0)] for i in range(20)]
+    accepted_pos = [[(j, i) for j in range(10) if grid[i][j] == background_color] for i in range(20)]
     # Flatten the matrix
     accepted_pos = [j for sub in accepted_pos for j in sub]
 
@@ -252,17 +430,6 @@ def draw_text_middle(surface, text, size, color):
     surface.blit(label, (top_left_x + play_width/2 - (label.get_width()/2), top_left_y + play_height/2 - (label.get_height()/2)))
 
 
-# Draws the grid on the playzone
-# TODO: OPTIMIZA EL CODIGO (dibujalas por separado)
-def draw_grid(surface, grid):
-    for i in range(len(grid)):
-        pygame.draw.line(surface, (128, 128, 128), (top_left_x, top_left_y + i*block_size),
-                         (top_left_x + play_width, top_left_y + i*block_size))
-        for j in range(len(grid[i])):
-            pygame.draw.line(surface, (128, 128, 128), (top_left_x + j*block_size, top_left_y),
-                             (top_left_x + j*block_size, top_left_y + play_height))
-
-
 # TODO: reinicia reloj cuando limpias un row?
 # TODO: añadir efecto visual
 def clear_rows(grid, locked):
@@ -270,7 +437,7 @@ def clear_rows(grid, locked):
     inc = 0
     for i in range(len(grid) - 1, -1, -1):
         row = grid[i]
-        if (0, 0, 0) not in row:
+        if background_color not in row:
             inc += 1
             ind = i
             for j in range(len(row)):
@@ -291,61 +458,11 @@ def clear_rows(grid, locked):
     return inc
 
 
-# TODO: saca el font afuera y usalo personalizado
-def draw_next_shape(shape, surface):
-    font = pygame.font.SysFont('comicsans', 30)
-    label = font.render('NEXT SHAPE', 1, (255, 255, 255))
-
-    sx = top_left_x + play_width + 50
-    sy = top_left_y + play_height / 2 - 100
-
-    shape_format = shape.shape[shape.rotation % len(shape.shape)]
-
-    for i, line in enumerate(shape_format):
-        row = list(line)
-        for j, column in enumerate(row):
-            if column == '0':
-                pygame.draw.rect(surface, shape.color, (sx + j*block_size, sy + i * block_size, block_size, block_size), 0)
-
-    surface.blit(label, (sx + 10, sy - 30))
-
-
-def draw_window(surface, grid, score=0):
-
-    # Fills the background (black color)
-    surface.fill((0,0,0))
-
-    # TODO: Cambia la font a una font arcade?
-    # (con pygame.font.Font se le puede pasar como parametro)
-    font = pygame.font.SysFont('comicsans', 60)
-    label = font.render("TETRIS", 1, (255,255,255))
-
-    surface.blit(label, (top_left_x + play_width / 2 - label.get_width() / 2, 30))
-
-    for i in range(len(grid)):
-        for j in range(len(grid[i])):
-            pygame.draw.rect(surface, grid[i][j], (top_left_x + j*block_size, top_left_y + i*block_size, block_size, block_size), 0)
-
-    pygame.draw.rect(surface, (255, 0, 0), (top_left_x, top_left_y, play_width, play_height), 4)
-
-    font = pygame.font.SysFont('comicsans', 30)
-    label = font.render('SCORE: ' + str(score), 1, (255, 255, 255))
-
-    sx = top_left_x + play_width + 50
-    sy = top_left_y + play_height / 2 - 100
-
-    surface.blit(label, (sx + 10, sy + 200))
-
-    draw_grid(surface, grid)
-
-    # TODO ELIMINA ESTO
-    # pygame.display.update()
-
 def main(win):
     
     locked_positions = {}
     # TODO: ESTO ASI NO ME LUCE
-    #high_score = max_score()
+    # high_score = max_score()
 
     change_piece = False
     run = True
@@ -391,6 +508,7 @@ def main(win):
 
             # TODO: Entiende mejor el codigo
             # TODO: Ajusta esto (permitimos pulsaciones seguidas)
+            # TODO: No estartía de más poder cerrar el juego con la tecla ESC
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_LEFT:
                     current_piece.x -= 1
@@ -414,6 +532,7 @@ def main(win):
                         current_piece.y += 1
 
                     current_piece.y -= 1
+                    change_piece = True
 
                 if event.key == pygame.K_r:
                     current_piece.rotation += 1
@@ -436,11 +555,8 @@ def main(win):
             change_piece = False
             score += clear_rows(grid, locked_positions)
 
-
-        # TODO: Funcion general manager que dibuja TODO en la ventana
-        # y luego lo actualiza de una (para evitar este plataco de espagueti)
-        draw_window(win, grid, score)
-        draw_next_shape(next_piece, win)
+        # Draw everything and update the screen
+        draw_manager(win, grid, current_piece, next_piece, score)
         pygame.display.flip()
 
         if check_lost(locked_positions):
@@ -448,17 +564,13 @@ def main(win):
             draw_text_middle(win, "GAME OVER", 80, (255, 255, 255))
             pygame.time.delay(1500)
             run = False
-
-            pygame.display.quit()
-            pygame.quit()
-            sys.exit()
             # update_score(score)
 
 
 def main_menu(win):
     run = True
     while run:
-        win.fill((0,0,0))
+        win.fill((0, 0, 0))
         draw_text_middle(win, "PRESS ANY KEY TO PLAY", 60, (255, 255, 255))
         pygame.display.update()
         for event in pygame.event.get():
@@ -466,12 +578,15 @@ def main_menu(win):
                 run = False
             if event.type == pygame.KEYDOWN:
                 main(win)
+                pygame.event.clear()
 
     pygame.display.quit()
     pygame.quit()
     sys.exit()
 
 
-win = pygame.display.set_mode((s_width, s_height))
-pygame.display.set_caption("DQL - TETRIS")
-main_menu(win)  # start game
+if __name__ == "__main__":
+    pygame.font.init()
+    win = pygame.display.set_mode((screen_width, screen_height))
+    pygame.display.set_caption("DQL - TETRIS")
+    main_menu(win)  # start game
