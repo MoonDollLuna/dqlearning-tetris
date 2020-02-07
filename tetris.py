@@ -223,6 +223,9 @@ def draw_playzone(surface, grid):
             # If not background, draw the border
             if grid[i][j] != background_color:
                 pygame.draw.rect(surface, piece_border_color, (top_left_x + j * block_size, top_left_y + i * block_size, block_size, block_size), 1)
+            # Else, draw a light gray grid
+            else:
+                pygame.draw.rect(surface, (160, 160, 160), (top_left_x + j * block_size, top_left_y + i * block_size, block_size, block_size), 1)
 
     # Draws two borders around the playground
     pygame.draw.rect(surface, playground_border_color, (20, 0, block_size // 2, screen_height), 0)
