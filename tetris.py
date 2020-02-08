@@ -241,18 +241,24 @@ def draw_shadow_drop(surface, shape, grid):
     :param grid: Grid containing all the fixed blocks.
     """
 
-    # TODO: ESTO NO VA Y NO TENGO CLARO POR QUE
-    # Clone the shape
+    # Clone the shape and the grid
     shadow_shape = copy.deepcopy(shape)
+    clones_grid = copy.deepcopy(grid)
+
+    # Remove the current piece from the grid
+    for (x, y) in convert_shape_format(shadow_shape):
+        if y >= 0:
+            clones_grid[y][x] = background_color
 
     # Find the position where the piece would be
-    while valid_space(shadow_shape, grid):
+    while valid_space(shadow_shape, clones_grid):
         shadow_shape.y += 1
     shadow_shape.y -= 1
 
-    # Draw all the blocks in the appropiate color
+    # Draw all the blocks currently not overlapping with the shape in the appropiate color
     for position in convert_shape_format(shadow_shape):
-        pygame.draw.rect(surface, shadow_shape.color, (top_left_x + position[0] * block_size, top_left_y + position[1] * block_size, block_size, block_size), 5)
+        if position not in convert_shape_format(shape):
+            pygame.draw.rect(surface, shadow_shape.color, (top_left_x + position[0] * block_size, top_left_y + position[1] * block_size, block_size, block_size), 5)
 
 
 def draw_next_shape(surface, shape):
@@ -268,7 +274,7 @@ def draw_next_shape(surface, shape):
     hud_begin_y = 480
 
     # Draw a rectangle to contain the title
-    pygame.draw.rect (surface, background_color, (hud_begin_x, hud_begin_y + 20, screen_width - hud_begin_x - 10, 60), 0)
+    pygame.draw.rect(surface, background_color, (hud_begin_x, hud_begin_y + 20, screen_width - hud_begin_x - 10, 60), 0)
     pygame.draw.rect(surface, playground_border_color, (hud_begin_x, hud_begin_y + 20, screen_width - hud_begin_x - 10, 60), 5)
 
     # Draw the title and place it
