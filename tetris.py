@@ -2,7 +2,12 @@
 # Based on the following tutorial:
 # https://techwithtim.net/tutorials/game-development-with-python/tetris-pygame/tutorial-1/
 
-# Imports
+# The game consists of a 10 x 20 grid (standard tetris size)
+
+###########
+# IMPORTS #
+###########
+
 import pygame
 import random
 import sys
@@ -10,23 +15,8 @@ import argparse
 import copy
 import random
 
-# creating the data structure for pieces
-# setting up global vars
-# functions
-# - create_grid
-# - draw_grid
-# - draw_window
-# - rotating shape in main
-# - setting up the main
-
-"""
-10 x 20 square grid
-shapes: S, Z, I, O, J, L, T
-represented in order by 0 - 6
-"""
-
 ####################
-# Global variables #
+# GLOBAL VARIABLES #
 ####################
 
 # Window size
@@ -160,6 +150,12 @@ background_color = (170, 170, 170)
 piece_border_color = (0, 0, 0)
 playground_border_color = (75, 75, 75)
 
+####################
+# PLAYER VARIABLES #
+####################
+
+# TODO: METE AQUI LAS VARIABLES DEL JUGADOR COMO JUGADOR O AGENTE, ETC.
+
 #####################
 # CLASS DEFINITIONS #
 #####################
@@ -256,7 +252,7 @@ def draw_shadow_drop(surface, shape, grid):
     clones_grid = copy.deepcopy(grid)
 
     # Remove the current piece from the grid
-    for (x, y) in convert_shape_format(shadow_shape):
+    for (x, y) in generate_shape_positions(shadow_shape):
         if y >= 0:
             clones_grid[y][x] = background_color
 
@@ -266,8 +262,8 @@ def draw_shadow_drop(surface, shape, grid):
     shadow_shape.y -= 1
 
     # Draw all the blocks currently not overlapping with the shape in the appropiate color
-    for (x, y) in convert_shape_format(shadow_shape):
-        if (x, y) not in convert_shape_format(shape):
+    for (x, y) in generate_shape_positions(shadow_shape):
+        if (x, y) not in generate_shape_positions(shape):
             pygame.draw.rect(surface, shadow_shape.color, (top_left_x + x * block_size, top_left_y + y * block_size, block_size, block_size), 5)
 
 
@@ -411,34 +407,50 @@ def get_shape(shapes):
 
 
 def create_grid(locked_positions={}):
+    """
+    Generates the grid (the inner codification of the playzone).
+
+    :param locked_positions: A dictionary containing the position of all locked pieces (including the current piece).
+    Key = (x, y) position of the piece. Value = Color of the piece.
+    :return: Matrix containing all the colors of the grid, where matrix[y][x] = color in the position (x, y).
+    """
+
     # Grid (playzone) is represented as a matrix of colours
-    # Initially all colors (empty positions) are black
+    # Initially all colors (empty positions) are of the background color
     grid = [[background_color for _ in range(10)] for _ in range(20)]
 
-    # For all fixed blocks (locked positions), color the corresponding position
-    # to the appropriate color
+    # For all fixed blocks (locked positions), color the corresponding position to the appropiate color
     for i in range(len(grid)):
         for j in range(len(grid[i])):
             if (j, i) in locked_positions:
-                c = locked_positions[(j, i)]
-                grid[i][j] = c
+                grid[i][j] = locked_positions[(j, i)]
 
     return grid
 
 
-def convert_shape_format(shape):
+def generate_shape_positions(shape):
+    """
+    Converts the current shape position into a list of usable (x, y) coordinates.
+
+    :param shape: Shape to obtain the position of.
+    :return: List containing the (x, y) coordinates of all the blocks of the shape.
+    """
+
+    # List of positions to be returned
     positions = []
 
-    # Identify current shape
+    # Obtain the codification of the current shape
     shape_format = shape.shape[shape.rotation % len(shape.shape)]
 
+    # Explores the codification of the shape, line by line
     for i, line in enumerate(shape_format):
         row = list(line)
         for j, column in enumerate(row):
+            # If a 0 is found (a block), add the position to the list of positions
             if column == '0':
                 positions.append((shape.x + j, shape.y + i))
 
-    # TODO: CALCULA MEJOR EL OFFSET? ESTO ES MUY CUTRE
+    # Since the codifications have an offset, remove it to obtain the true position
     for i, pos in enumerate(positions):
         positions[i] = (pos[0] - 2, pos[1] - 4)
 
@@ -446,38 +458,57 @@ def convert_shape_format(shape):
 
 
 def valid_space(shape, grid):
+    """
+    Checks if the position of the shape would be valid in the current grid.
+
+    :param shape: Shape to check if the position is valid.
+    :param grid: Grid containing the state of the playzone.
+    :return: True if the position is valid, False otherwise.
+    """
+
+    # Obtain a list with all the valid positions (positions that have the background color) and flatten it
     accepted_pos = [[(j, i) for j in range(10) if grid[i][j] == background_color] for i in range(20)]
-    # Flatten the matrix
     accepted_pos = [j for sub in accepted_pos for j in sub]
 
-    formatted = convert_shape_format(shape)
+    # Obtain the coordinates of the shape
+    formatted = generate_shape_positions(shape)
 
+    # Check if the coordinates of the shape are in the accepted position
     for pos in formatted:
+        # Position invalid
         if pos not in accepted_pos:
-            # Ignore new tetraminos
-            # (still falling, Y > -1)
+            # If y is less than 0 (above the screen), ignore it. This will ignore pieces that have been just spawned.
             if pos[1] > -1:
                 return False
     return True
 
 
-def check_lost(positions):
+def check_defeat(positions):
+    """
+    Check if the game is over (a piece has reached the top of the screen)
+
+    :param positions: Dictionary of locked positions, where key = (x, y) position and value = color of the position.
+    :return: True if the game is over, False otherwise.
+    """
+
+    # Loop over all the keys
     for pos in positions:
+        # If any locked position has y < 1 (0 or greater), the top has been reached and the game is over
         if pos[1] < 1:
             return True
     return False
-
-# TODO: ESTA FUNCION SE PUEDE READAPTAR
-def draw_text_middle(surface, text, size, color):
-    font = pygame.font.SysFont("comicsans", size, bold=True)
-    label = font.render(text, 1, color)
-
-    surface.blit(label, (top_left_x + play_width/2 - (label.get_width()/2), top_left_y + play_height/2 - (label.get_height()/2)))
 
 
 # TODO: reinicia reloj cuando limpias un row?
 # TODO: añadir efecto visual
 def clear_rows(grid, locked):
+    """
+    Removes all cleared rows from the grid, and computes the score.
+
+    :param grid: Matrix representing the current state of the playzone.
+    :param locked: Dictionary of locked positions, where Key = (x, y) coordinates of the piece.
+    :return: Score computed from clearing the rows.
+    """
 
     inc = 0
     for i in range(len(grid) - 1, -1, -1):
@@ -501,6 +532,15 @@ def clear_rows(grid, locked):
                 locked[newKey] = locked.pop(key)
 
     return inc
+
+
+# TODO: ESTA FUNCION SE PUEDE READAPTAR
+def draw_text_middle(surface, text, size, color):
+    font = pygame.font.SysFont("comicsans", size, bold=True)
+    label = font.render(text, 1, color)
+
+    surface.blit(label, (top_left_x + play_width/2 - (label.get_width()/2), top_left_y + play_height/2 - (label.get_height()/2)))
+
 
 ##################
 # MAIN FUNCTIONS #
@@ -596,7 +636,7 @@ def main(win):
                     if not valid_space(current_piece, grid):
                         current_piece.rotation -= 1
 
-        shape_pos = convert_shape_format(current_piece)
+        shape_pos = generate_shape_positions(current_piece)
 
         for i in range(len(shape_pos)):
             x, y = shape_pos[i]
@@ -616,7 +656,7 @@ def main(win):
         draw_manager(win, grid, current_piece, next_piece, score)
         pygame.display.flip()
 
-        if check_lost(locked_positions):
+        if check_defeat(locked_positions):
             # TODO: AJUSTA ESTO QUE NO ME CONVENCE
             draw_text_middle(win, "GAME OVER", 80, (255, 255, 255))
             pygame.time.delay(1500)
