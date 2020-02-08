@@ -8,6 +8,7 @@ import random
 import sys
 import argparse
 import copy
+import random
 
 # creating the data structure for pieces
 # setting up global vars
@@ -163,9 +164,18 @@ playground_border_color = (75, 75, 75)
 # CLASS DEFINITIONS #
 #####################
 
-
 class Piece(object):
+    """Tetramino (piece) used by the game."""
+
     def __init__(self, x, y, shape):
+        """
+        Constructor. Creates a piece, indicating the (x, y) position and the specific shape.
+
+        :param x: Initial x position of the shape.
+        :param y: Initial y position of the shape.
+        :param shape: Shape to be used.
+        """
+
         self.x = x
         self.y = y
         self.shape = shape
@@ -256,9 +266,9 @@ def draw_shadow_drop(surface, shape, grid):
     shadow_shape.y -= 1
 
     # Draw all the blocks currently not overlapping with the shape in the appropiate color
-    for position in convert_shape_format(shadow_shape):
-        if position not in convert_shape_format(shape):
-            pygame.draw.rect(surface, shadow_shape.color, (top_left_x + position[0] * block_size, top_left_y + position[1] * block_size, block_size, block_size), 5)
+    for (x, y) in convert_shape_format(shadow_shape):
+        if (x, y) not in convert_shape_format(shape):
+            pygame.draw.rect(surface, shadow_shape.color, (top_left_x + x * block_size, top_left_y + y * block_size, block_size, block_size), 5)
 
 
 def draw_next_shape(surface, shape):
@@ -367,6 +377,39 @@ def draw_hud(surface, score, level, lines):
 # GAMEPLAY METHODS #
 ####################
 
+def bag_randomizer():
+    """
+    Generates a random set of pieces. All seven pieces are included in a random order.
+    :return: A randomized list of pieces.
+    """
+
+    # Get the list of pieces and randomly shuffle it
+    shuffled_list = copy.deepcopy(shapes)
+    random.shuffle(shuffled_list)
+
+    return shuffled_list
+
+
+def get_shape(shapes):
+    """
+    Gets a shape from the shapes list. If it is empty, refills it using a bag randomizer.
+
+    :param shapes: List of shapes from which to get the shape.
+    :return: The shape and the modified list of shapes.
+    """
+
+    # Check if the bag of pieces is empty
+    if len(shapes) == 0:
+        # If it is, refill it with the seven pieces (in a random order)
+        shapes = bag_randomizer()
+
+    # Take the top value from the list and create the shape
+    shape = shapes.pop(0)
+    piece = Piece(5, 0, shape)
+
+    return piece, shapes
+
+
 def create_grid(locked_positions={}):
     # Grid (playzone) is represented as a matrix of colours
     # Initially all colors (empty positions) are black
@@ -424,13 +467,6 @@ def check_lost(positions):
             return True
     return False
 
-
-# Returns a random shape
-# TODO: Haz bag randomizer
-def get_shape():
-    return Piece(5, 0, random.choice(shapes))
-
-
 # TODO: ESTA FUNCION SE PUEDE READAPTAR
 def draw_text_middle(surface, text, size, color):
     font = pygame.font.SysFont("comicsans", size, bold=True)
@@ -466,24 +502,36 @@ def clear_rows(grid, locked):
 
     return inc
 
+##################
+# MAIN FUNCTIONS #
+##################
 
 def main(win):
-    
+
+    # Variables used by the main loop
     locked_positions = {}
+    # TODO: Ajusta el fall_speed
+    fall_speed = 0.27
+    # TODO: Ajusta el score
+    score = 0
+
     # TODO: ESTO ASI NO ME LUCE
     # high_score = max_score()
 
     change_piece = False
     run = True
-    current_piece = get_shape()
-    next_piece = get_shape()
+
+    # Generates an initial list of shapes
+    randomizer_shapes = bag_randomizer()
+
+    # Get the initial piece and the initial next piece
+    current_piece, randomizer_shapes = get_shape(randomizer_shapes)
+    next_piece, randomizer_shapes = get_shape(randomizer_shapes)
+
+    # Initializes the clock and the counters
     clock = pygame.time.Clock()
     fall_time = 0
-    # TODO: Ajusta el fall_speed
-    fall_speed = 0.27
     level_time = 0
-    # TODO: Ajusta el score
-    score = 0
 
     while run:
 
@@ -560,7 +608,7 @@ def main(win):
                 p = (pos[0], pos[1])
                 locked_positions[p] = current_piece.color
             current_piece = next_piece
-            next_piece = get_shape()
+            next_piece, randomizer_shapes = get_shape(randomizer_shapes)
             change_piece = False
             score += clear_rows(grid, locked_positions)
 
