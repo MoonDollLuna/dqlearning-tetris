@@ -292,13 +292,12 @@ def draw_next_shape(surface, shape):
     pygame.draw.rect(surface, background_color, (hud_begin_x + 10, hud_begin_y + 90, screen_width - hud_begin_x - 30, 180), 0)
     pygame.draw.rect(surface, playground_border_color, (hud_begin_x + 10, hud_begin_y + 90, screen_width - hud_begin_x - 30, 180), 5)
 
-    # Draws the shape
+    # Draw the shape in the box
+    shape_format = shape.shape[shape.rotation % len(shape.shape)]
+
     sx = top_left_x + play_width + 40
     sy = hud_begin_y + 100
 
-    shape_format = shape.shape[shape.rotation % len(shape.shape)]
-
-    # TODO: POSIBLEMENTE SE PUEDE AJUSTAR ESTO
     for i, line in enumerate(shape_format):
         row = list(line)
         for j, column in enumerate(row):
@@ -507,14 +506,19 @@ def clear_rows(grid, locked):
 
     :param grid: Matrix representing the current state of the playzone.
     :param locked: Dictionary of locked positions, where Key = (x, y) coordinates of the piece.
-    :return: Score computed from clearing the rows.
+    :return: Number of cleared rows.
     """
 
+    # Compute how many lines to remove
     inc = 0
+    # For all values from the last to the first row
     for i in range(len(grid) - 1, -1, -1):
         row = grid[i]
+        # If there is no background color (the row is full of blocks)
         if background_color not in row:
+            # Increment the counter of lines and remove the blocks from the locked positions
             inc += 1
+            # Mark the highest row to remove (will be needed later)
             ind = i
             for j in range(len(row)):
                 try:
@@ -522,14 +526,16 @@ def clear_rows(grid, locked):
                 except:
                     continue
 
+    # If lines have been removed, update the neccesary lines in the grid with the new y values
     if inc > 0:
         # Explored in reverse order
         # (otherwise, we would crush previous positions)
-        for key in sorted(list(locked), key= lambda x: x[1])[::-1]:
+        for key in sorted(list(locked), key=lambda x: x[1])[::-1]:
             x, y = key
+            # Update all lines above the removed positions
             if y < ind:
-                newKey = (x, y + inc)
-                locked[newKey] = locked.pop(key)
+                new_key = (x, y + inc)
+                locked[new_key] = locked.pop(key)
 
     return inc
 
@@ -547,18 +553,28 @@ def draw_text_middle(surface, text, size, color):
 ##################
 
 def main(win):
+    """
+    Main logic of the game.
 
-    # Variables used by the main loop
+    :param win: Surface used to draw all the elements.
+    """
+
+    # Variables used by the main loop #
+
+    # Grid with all the locked positions
     locked_positions = {}
     # TODO: Ajusta el fall_speed
-    fall_speed = 0.27
+    # Speed at which the pieces fall (to be updated during the loop)
+    initial_speed = 0.27
+    fall_speed = initial_speed
     # TODO: Ajusta el score
+    # Score, lines cleared and level reached
     score = 0
-
-    # TODO: ESTO ASI NO ME LUCE
-    # high_score = max_score()
-
+    lines = 0
+    level = 0
+    # Piece is locked, need a new piece
     change_piece = False
+    # Game is still running
     run = True
 
     # Generates an initial list of shapes
@@ -573,13 +589,68 @@ def main(win):
     fall_time = 0
     level_time = 0
 
+    # While the game is not over (main logic loop)
     while run:
 
+        # Create the grid and update all the clocks, marking a new tick
         grid = create_grid(locked_positions)
         fall_time += clock.get_rawtime()
         level_time += clock.get_rawtime()
         clock.tick()
 
+        # Process all the player inputs
+        for event in pygame.event.get():
+
+            # Window has been closed
+            if event.type == pygame.QUIT:
+                pygame.display.quit()
+                pygame.quit()
+                sys.exit()
+
+            # Key has been pressed
+            if event.type == pygame.KEYDOWN:
+
+                # ESC key (exit to main menu)
+                if event.key == pygame.K_ESCAPE:
+                    run = False
+
+                # Left key (move left)
+                if event.key == pygame.K_LEFT:
+                    current_piece.x -= 1
+                    if not valid_space(current_piece, grid):
+                        current_piece.x += 1
+
+                # Right key (move right)
+                if event.key == pygame.K_RIGHT:
+                    current_piece.x += 1
+                    if not valid_space(current_piece, grid):
+                        current_piece.x -= 1
+
+                # Down key (soft drop)
+                if event.key == pygame.K_DOWN:
+                    current_piece.y += 1
+                    if not valid_space(current_piece, grid):
+                        current_piece.y -= 1
+
+                # Up key (hard/instant drop)
+                if event.key == pygame.K_UP:
+
+                    # Try to move the piece down until an illegal position is reached, and then move upwards to reach
+                    # the final valid position
+                    while valid_space(current_piece, grid):
+                        current_piece.y += 1
+                    current_piece.y -= 1
+
+                    # After a hard drop, piece will be guaranteed to be locked
+                    change_piece = True
+
+                # R key (rotation)
+                if event.key == pygame.K_r:
+                    current_piece.rotation += 1
+                    if not valid_space(current_piece, grid):
+                        current_piece.rotation -= 1
+
+        # Clock calculations (piece falling)
         # TODO AJUSTA ESTO
         if level_time/1000 > 5:
             level_time = 0
@@ -594,48 +665,7 @@ def main(win):
                 current_piece.y -= 1
                 change_piece = True
 
-        for event in pygame.event.get():
-
-            # TODO: Ajustar esto, que seguramente habra que cambiarlo
-            # (la IA tiene que poder entrenar automaticamente)
-            if event.type == pygame.QUIT:
-                pygame.display.quit()
-                pygame.quit()
-                sys.exit()
-
-            # TODO: Entiende mejor el codigo
-            # TODO: Ajusta esto (permitimos pulsaciones seguidas)
-            # TODO: No estartía de más poder cerrar el juego con la tecla ESC
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_LEFT:
-                    current_piece.x -= 1
-                    if not valid_space(current_piece, grid):
-                        current_piece.x += 1
-
-                if event.key == pygame.K_RIGHT:
-                    current_piece.x += 1
-                    if not valid_space(current_piece, grid):
-                        current_piece.x -= 1
-
-                if event.key == pygame.K_DOWN:
-                    current_piece.y += 1
-                    if not valid_space(current_piece, grid):
-                        current_piece.y -= 1
-
-                # Caida rapida
-                if event.key == pygame.K_UP:
-                    # TODO: Comentar mejor?
-                    while valid_space(current_piece, grid):
-                        current_piece.y += 1
-
-                    current_piece.y -= 1
-                    change_piece = True
-
-                if event.key == pygame.K_r:
-                    current_piece.rotation += 1
-                    if not valid_space(current_piece, grid):
-                        current_piece.rotation -= 1
-
+        # Place the current piece into the grid
         shape_pos = generate_shape_positions(current_piece)
 
         for i in range(len(shape_pos)):
@@ -643,17 +673,42 @@ def main(win):
             if y > -1:
                 grid[y][x] = current_piece.color
 
+        # If the piece has been locked in place
         if change_piece:
+            # Add the current piece to locked positions (conserving the lowest y value)
+            shape_y = -1
             for pos in shape_pos:
+                if pos[1] > shape_y:
+                    shape_y = pos[1]
                 p = (pos[0], pos[1])
                 locked_positions[p] = current_piece.color
+
+            # Get the next piece
             current_piece = next_piece
             next_piece, randomizer_shapes = get_shape(randomizer_shapes)
+
+            # Update lines and level
+            lines_cleared = clear_rows(grid, locked_positions)
+            lines += lines_cleared
+            level = lines // 10
+
+            # Update score
+            if lines_cleared == 0:
+                score += shape_y + 1
+            else:
+                multiplier = 0
+                # Compute the score to add
+                while lines_cleared > 0:
+                    multiplier += lines_cleared
+                    lines_cleared -= 1
+                score += (level + 1) * multiplier * 100
+
+            # Prepare everything for the next loop
             change_piece = False
-            score += clear_rows(grid, locked_positions)
+            clock.tick()
 
         # Draw everything and update the screen
-        draw_manager(win, grid, current_piece, next_piece, score)
+        draw_manager(win, grid, current_piece, next_piece, score, level, lines)
         pygame.display.flip()
 
         if check_defeat(locked_positions):
@@ -661,27 +716,47 @@ def main(win):
             draw_text_middle(win, "GAME OVER", 80, (255, 255, 255))
             pygame.time.delay(1500)
             run = False
-            # update_score(score)
 
 
+# TODO: PROBABLEMENTE SEPARA EN MAIN MENU Y GAME OVER SCREEN, O INCLUSO PON GAME OVER SCREEN DESPUES?
+# Lo suyo seria que no se aniden mas y mas funciones (memory leak garantizado)
 def main_menu(win):
+    """
+    Function that draws the main menu of the game.
+
+    :param win: Surface to draw everything on.
+    """
+
     run = True
+    # While the game is not closed
     while run:
+        # Draw the main menu
         win.fill((0, 0, 0))
         draw_text_middle(win, "PRESS ANY KEY TO PLAY", 60, (255, 255, 255))
         pygame.display.update()
+
+        # Check for player inputs
         for event in pygame.event.get():
+            # If the window is closed, simply exit the loop
             if event.type == pygame.QUIT:
                 run = False
+            # If a key is pressed
             if event.type == pygame.KEYDOWN:
-                main(win)
-                pygame.event.clear()
+                # If escape is pressed, close the game
+                if event.key == pygame.K_ESCAPE:
+                    run = False
+                # Else, start the game
+                else:
+                    main(win)
+                    pygame.event.clear()
 
+    # When closed, exit everything in an ordered way
     pygame.display.quit()
     pygame.quit()
     sys.exit()
 
 
+# Code to be executed if called directly
 if __name__ == "__main__":
     pygame.font.init()
     win = pygame.display.set_mode((screen_width, screen_height))
