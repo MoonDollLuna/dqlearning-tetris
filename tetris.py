@@ -368,6 +368,25 @@ def draw_hud(surface, score, level, lines):
                                lines_y + 55 - lines_score.get_height() / 2))
 
 
+def draw_clear_row(surface, lines):
+    """
+    Draws an effect when a line is cleared.
+
+    :param surface: Surface on which to draw the effect.
+    :param lines: List containing all of the cleared lines.
+    """
+
+    # Draws the effect on all cleared lines
+    for i in lines:
+        for j in range(0, 10):
+            pygame.draw.rect(surface, (240, 240, 240), (top_left_x + j * block_size, top_left_y + i * block_size, block_size, block_size), 0)
+        pygame.draw.rect(surface, (240, 240, 240), (top_left_x, top_left_y + i*block_size, play_width, block_size), 3)
+
+    # Print the effect on the screen for a bit
+    pygame.display.flip()
+    pygame.time.wait(300)
+
+
 ####################
 # GAMEPLAY METHODS #
 ####################
@@ -498,46 +517,56 @@ def check_defeat(positions):
     return False
 
 
-# TODO: reinicia reloj cuando limpias un row?
-# TODO: añadir efecto visual
 def clear_rows(grid, locked):
     """
-    Removes all cleared rows from the grid, and computes the score.
+    Removes all cleared rows from the grid.
 
     :param grid: Matrix representing the current state of the playzone.
     :param locked: Dictionary of locked positions, where Key = (x, y) coordinates of the piece.
-    :return: Number of cleared rows.
+    :return: List of cleared lines
     """
 
-    # Compute how many lines to remove
-    inc = 0
-    # For all values from the last to the first row
-    for i in range(len(grid) - 1, -1, -1):
+    # Removed lines
+    removed_lines = []
+
+    # Compute which lines to remove
+    # For all values from first to the last row
+    for i in range(0, len(grid)):
         row = grid[i]
         # If there is no background color (the row is full of blocks)
         if background_color not in row:
-            # Increment the counter of lines and remove the blocks from the locked positions
-            inc += 1
-            # Mark the highest row to remove (will be needed later)
-            ind = i
+            # Add the current row to the list of removed rows
+            removed_lines.append(i)
+
+            # Remove all blocks in the line
             for j in range(len(row)):
                 try:
                     del locked[(j, i)]
                 except:
                     continue
 
-    # If lines have been removed, update the neccesary lines in the grid with the new y values
-    if inc > 0:
+    # If lines have been removed, update the necessary lines in the grid with the new y values
+    if len(removed_lines) > 0:
         # Explored in reverse order
         # (otherwise, we would crush previous positions)
+
+        # Note: [::-1] is an iterator, that basically allows to access the sorted list in an inverse order
+        # (from the biggest to the smallest value)
+        # Iterators use the format [start:end:step]
         for key in sorted(list(locked), key=lambda x: x[1])[::-1]:
             x, y = key
-            # Update all lines above the removed positions
-            if y < ind:
-                new_key = (x, y + inc)
-                locked[new_key] = locked.pop(key)
 
-    return inc
+            # Compute the offset of the line
+            offset = 0
+            for line in removed_lines:
+                if line > y:
+                    offset += 1
+
+            # Update the value of blocks
+            new_key = (x, y + offset)
+            locked[new_key] = locked.pop(key)
+
+    return removed_lines
 
 
 # TODO: ESTA FUNCION SE PUEDE READAPTAR
@@ -675,7 +704,7 @@ def main(win):
 
         # If the piece has been locked in place
         if change_piece:
-            # Add the current piece to locked positions (conserving the lowest y value)
+            # Add the current piece to locked positions (conserving the biggest y value)
             shape_y = -1
             for pos in shape_pos:
                 if pos[1] > shape_y:
@@ -689,18 +718,22 @@ def main(win):
 
             # Update lines and level
             lines_cleared = clear_rows(grid, locked_positions)
-            lines += lines_cleared
+            lines += len(lines_cleared)
             level = lines // 10
 
             # Update score
-            if lines_cleared == 0:
+            if len(lines_cleared) == 0:
                 score += shape_y + 1
             else:
-                multiplier = 0
+                # Draw the effect on the screen
+                draw_clear_row(win, lines_cleared)
+
                 # Compute the score to add
-                while lines_cleared > 0:
-                    multiplier += lines_cleared
-                    lines_cleared -= 1
+                multiplier = 0
+                buffer = len(lines_cleared)
+                while buffer > 0:
+                    multiplier += buffer
+                    buffer -= 1
                 score += (level + 1) * multiplier * 100
 
             # Prepare everything for the next loop
