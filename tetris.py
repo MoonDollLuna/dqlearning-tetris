@@ -149,12 +149,28 @@ shape_colors = [(0, 240, 0), (240, 0, 0), (0, 240, 240), (240, 240, 0), (240, 16
 background_color = (170, 170, 170)
 piece_border_color = (0, 0, 0)
 playground_border_color = (75, 75, 75)
+clear_color = (240, 240, 240)
+
+# Sound gallery
+sound_gallery = {}
+
+# Path to the background song
+path_song = "./sounds/tetristheme.mid"
 
 ####################
 # PLAYER VARIABLES #
 ####################
 
-# TODO: METE AQUI LAS VARIABLES DEL JUGADOR COMO JUGADOR O AGENTE, ETC.
+# Sound is active or not
+sound_active = True
+
+###################
+# INITIALIZATIONS #
+###################
+
+pygame.font.init()
+pygame.mixer.init()
+
 
 #####################
 # CLASS DEFINITIONS #
@@ -379,12 +395,121 @@ def draw_clear_row(surface, lines):
     # Draws the effect on all cleared lines
     for i in lines:
         for j in range(0, 10):
-            pygame.draw.rect(surface, (240, 240, 240), (top_left_x + j * block_size, top_left_y + i * block_size, block_size, block_size), 0)
-        pygame.draw.rect(surface, (240, 240, 240), (top_left_x, top_left_y + i*block_size, play_width, block_size), 3)
+            pygame.draw.rect(surface, clear_color, (top_left_x + j * block_size, top_left_y + i * block_size, block_size, block_size), 0)
+        pygame.draw.rect(surface, clear_color, (top_left_x, top_left_y + i*block_size, play_width, block_size), 3)
 
     # Print the effect on the screen for a bit
     pygame.display.flip()
     pygame.time.wait(300)
+
+
+def draw_game_over_effect(surface):
+    """
+    Draws an effect on the playzone when a line is cleared.
+
+    :param surface: Surface on which to draw the effect
+    """
+
+    # Draws the effect on all lines (from the bottom row to the first one), waiting a bit on each one
+    for i in range((play_height // block_size) - 1, -1, -1):
+        for j in range(0, (play_width // block_size)):
+            pygame.draw.rect(surface, (200, 200, 200), (top_left_x + j * block_size, top_left_y + i * block_size, block_size, block_size), 0)
+            pygame.draw.rect(surface, piece_border_color,(top_left_x + j * block_size, top_left_y + i * block_size, block_size, block_size), 1)
+        pygame.display.flip()
+        pygame.time.wait(40)
+
+    pygame.time.wait(300)
+
+    # Draws GAME OVER on the play zone
+    font = pygame.font.Font(font_path, 40)
+    text = font.render('GAME OVER!', 1, (15, 15, 15))
+    surface.blit(text, (top_left_x + (play_width // 2) - text.get_width() / 2, screen_height // 2 - text.get_height() / 2))
+    pygame.display.flip()
+
+    # Waits a bit of extra time (for good measure)
+    pygame.time.wait(1500)
+
+
+def draw_main_menu(surface):
+    """
+    Draws the main menu.
+
+    :param surface: Surface on which to draw the menu.
+    """
+
+    # Draws the background
+    surface.fill((15, 15, 15))
+
+    # Creates the title
+    title_font = pygame.font.Font(font_path, 100)
+    title_text = title_font.render('TETRIS', 1, (255, 255, 255))
+    surface.blit(title_text, (screen_width / 2 - title_text.get_width() / 2, 150 - title_text.get_height() / 2))
+
+    # Create the subtitle
+    subtitle_font = pygame.font.Font(font_path, 30)
+    subtitle_text = subtitle_font.render('FOR DEEP-Q LEARNING', 1, (255, 255, 255))
+    surface.blit(subtitle_text, (screen_width / 2 - subtitle_text.get_width() / 2, 225 - subtitle_text.get_height() / 2))
+
+    # Create the start message
+    start_font = pygame.font.Font(font_path, 30)
+    start_text = start_font.render('PRESS ANY', 1, (255, 255, 255))
+    surface.blit(start_text, (screen_width / 2 - start_text.get_width() / 2, 450 - start_text.get_height() / 2))
+    start_text2 = start_font.render('KEY TO START!', 1, (255, 255, 255))
+    surface.blit(start_text2, (screen_width / 2 - start_text2.get_width() / 2, 500 - start_text2.get_height() / 2))
+
+    # Create the developed disclaimer
+    developed_font = pygame.font.Font(font_path, 15)
+    developed_text = developed_font.render('DEVELOPED BY LUNA JIMENEZ FERNANDEZ', 1, (255, 255, 255))
+    surface.blit(developed_text, (screen_width / 2 - developed_text.get_width() / 2, 750 - developed_text.get_height() / 2))
+
+    # Draw the screen
+    pygame.display.flip()
+
+
+#################
+# SOUND METHODS #
+#################
+
+def prepare_sounds(list_sounds):
+    """
+    Creates a sound gallery with all the initialized Sounds.
+
+    :param list_sounds: List containing the name and path of all the sound files.
+    """
+
+    dictionary_sounds = {}
+
+    # For each sound in path, initialize it
+    for (name, path) in list_sounds:
+        dictionary_sounds[name] = pygame.mixer.Sound(path)
+
+    return dictionary_sounds
+
+
+def play_sound(sound):
+    """
+    If sound is active, play a sound.
+
+    :param sound: Sound object to be played.
+    """
+
+    if sound_active:
+        sound.play()
+
+
+def play_song():
+    """Starts playing the background music on loop (if sound is active)."""
+    pygame.mixer.music.load(path_song)
+
+    if sound_active:
+        pygame.mixer.music.play(-1)
+
+
+def stop_sounds():
+    """Stops playing all sounds."""
+
+    pygame.mixer.pause()
+    pygame.mixer.music.stop()
 
 
 ####################
@@ -569,14 +694,6 @@ def clear_rows(grid, locked):
     return removed_lines
 
 
-# TODO: ESTA FUNCION SE PUEDE READAPTAR
-def draw_text_middle(surface, text, size, color):
-    font = pygame.font.SysFont("comicsans", size, bold=True)
-    label = font.render(text, 1, color)
-
-    surface.blit(label, (top_left_x + play_width/2 - (label.get_width()/2), top_left_y + play_height/2 - (label.get_height()/2)))
-
-
 ##################
 # MAIN FUNCTIONS #
 ##################
@@ -592,11 +709,13 @@ def main(win):
 
     # Grid with all the locked positions
     locked_positions = {}
-    # TODO: Ajusta el fall_speed
+
     # Speed at which the pieces fall (to be updated during the loop)
-    initial_speed = 0.27
+    # Speed can be increased up to 9 times at most
+    initial_speed = 0.5
     fall_speed = initial_speed
-    # TODO: Ajusta el score
+    speed_modifier = 0.05
+
     # Score, lines cleared and level reached
     score = 0
     lines = 0
@@ -617,6 +736,9 @@ def main(win):
     clock = pygame.time.Clock()
     fall_time = 0
     level_time = 0
+
+    # Start playing the song
+    play_song()
 
     # While the game is not over (main logic loop)
     while run:
@@ -642,6 +764,7 @@ def main(win):
                 # ESC key (exit to main menu)
                 if event.key == pygame.K_ESCAPE:
                     run = False
+                    stop_sounds()
 
                 # Left key (move left)
                 if event.key == pygame.K_LEFT:
@@ -680,13 +803,6 @@ def main(win):
                         current_piece.rotation -= 1
 
         # Clock calculations (piece falling)
-        # TODO AJUSTA ESTO
-        if level_time/1000 > 5:
-            level_time = 0
-            if fall_speed > 0.12:
-                fall_speed -= 0.005
-
-        # TODO: CREO QUE AQUI DARA PROBLEMAS (quizas interesara moverlo abajo?)
         if fall_time/1000 > fall_speed:
             fall_time = 0
             current_piece.y += 1
@@ -696,7 +812,6 @@ def main(win):
 
         # Place the current piece into the grid
         shape_pos = generate_shape_positions(current_piece)
-
         for i in range(len(shape_pos)):
             x, y = shape_pos[i]
             if y > -1:
@@ -716,10 +831,14 @@ def main(win):
             current_piece = next_piece
             next_piece, randomizer_shapes = get_shape(randomizer_shapes)
 
-            # Update lines and level
+            # Update lines, level and speed
             lines_cleared = clear_rows(grid, locked_positions)
             lines += len(lines_cleared)
             level = lines // 10
+
+            fall_speed = initial_speed - speed_modifier * level
+            if fall_speed < 0.05:
+                fall_speed = 0.05
 
             # Update score
             if len(lines_cleared) == 0:
@@ -745,15 +864,12 @@ def main(win):
         pygame.display.flip()
 
         if check_defeat(locked_positions):
-            # TODO: AJUSTA ESTO QUE NO ME CONVENCE
-            draw_text_middle(win, "GAME OVER", 80, (255, 255, 255))
-            pygame.time.delay(1500)
+            stop_sounds()
+            draw_game_over_effect(win)
             run = False
 
 
-# TODO: PROBABLEMENTE SEPARA EN MAIN MENU Y GAME OVER SCREEN, O INCLUSO PON GAME OVER SCREEN DESPUES?
-# Lo suyo seria que no se aniden mas y mas funciones (memory leak garantizado)
-def main_menu(win):
+def menu_logic(win):
     """
     Function that draws the main menu of the game.
 
@@ -761,12 +877,11 @@ def main_menu(win):
     """
 
     run = True
+
     # While the game is not closed
     while run:
         # Draw the main menu
-        win.fill((0, 0, 0))
-        draw_text_middle(win, "PRESS ANY KEY TO PLAY", 60, (255, 255, 255))
-        pygame.display.update()
+        draw_main_menu(win)
 
         # Check for player inputs
         for event in pygame.event.get():
@@ -791,7 +906,8 @@ def main_menu(win):
 
 # Code to be executed if called directly
 if __name__ == "__main__":
-    pygame.font.init()
     win = pygame.display.set_mode((screen_width, screen_height))
     pygame.display.set_caption("DQL - TETRIS")
-    main_menu(win)  # start game
+
+    # Start the game
+    menu_logic(win)
