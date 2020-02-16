@@ -155,7 +155,7 @@ clear_color = (240, 240, 240)
 sound_gallery = {}
 
 # Path to the background song
-path_song = "./sounds/tetristheme.mid"
+path_song = "./sounds/tetristhemea.mid"
 
 ####################
 # PLAYER VARIABLES #
@@ -169,6 +169,8 @@ sound_active = True
 ###################
 
 pygame.font.init()
+pygame.mixer.pre_init(22050, -16, 2, 32)
+pygame.init()
 pygame.mixer.init()
 
 
@@ -490,11 +492,12 @@ def play_sound(sound):
     """
     If sound is active, play a sound.
 
-    :param sound: Sound object to be played.
+    :param sound: Name of the sound to be played
     """
 
     if sound_active:
-        sound.play()
+        if sound in sound_gallery:
+            sound_gallery[sound].play()
 
 
 def play_song():
@@ -502,6 +505,7 @@ def play_song():
     pygame.mixer.music.load(path_song)
 
     if sound_active:
+        pygame.mixer.music.set_volume(0.5)
         pygame.mixer.music.play(-1)
 
 
@@ -766,17 +770,19 @@ def main(win):
                     run = False
                     stop_sounds()
 
-                # Left key (move left)
+                # Left key (move left and play the appropiate sound)
                 if event.key == pygame.K_LEFT:
                     current_piece.x -= 1
                     if not valid_space(current_piece, grid):
                         current_piece.x += 1
+                    play_sound("action")
 
-                # Right key (move right)
+                # Right key (move right and play the appropiate sound)
                 if event.key == pygame.K_RIGHT:
                     current_piece.x += 1
                     if not valid_space(current_piece, grid):
                         current_piece.x -= 1
+                    play_sound("action")
 
                 # Down key (soft drop)
                 if event.key == pygame.K_DOWN:
@@ -796,11 +802,12 @@ def main(win):
                     # After a hard drop, piece will be guaranteed to be locked
                     change_piece = True
 
-                # R key (rotation)
+                # R key (rotation and play the appropiate sound)
                 if event.key == pygame.K_r:
                     current_piece.rotation += 1
                     if not valid_space(current_piece, grid):
                         current_piece.rotation -= 1
+                    play_sound("action")
 
         # Clock calculations (piece falling)
         if fall_time/1000 > fall_speed:
@@ -840,11 +847,21 @@ def main(win):
             if fall_speed < 0.05:
                 fall_speed = 0.05
 
+            # Play the piece lock sound
+            play_sound("fall")
+
             # Update score
             if len(lines_cleared) == 0:
+                # No lines cleared
                 score += shape_y + 1
             else:
-                # Draw the effect on the screen
+                # One or more lines cleared
+
+                # Play the appropriate sound. Sound is played before the effect is drawn to ensure it's not delayed
+                play_sound("line")
+
+                # Draw the screen first (to ensure the piece is displayed on its proper place) and then draw the effect
+                draw_manager(win, grid, current_piece, next_piece, score, level, lines - len(lines_cleared))
                 draw_clear_row(win, lines_cleared)
 
                 # Compute the score to add
@@ -865,6 +882,7 @@ def main(win):
 
         if check_defeat(locked_positions):
             stop_sounds()
+            play_sound("lost")
             draw_game_over_effect(win)
             run = False
 
@@ -908,6 +926,10 @@ def menu_logic(win):
 if __name__ == "__main__":
     win = pygame.display.set_mode((screen_width, screen_height))
     pygame.display.set_caption("DQL - TETRIS")
+
+    # If the sound is active, load the sounds (no need to otherwise)
+    if sound_active:
+        sound_gallery = prepare_sounds([("action", "./sounds/beep.wav"), ("fall", "./sounds/fall.wav"), ("line", "./sounds/lineclear.ogg"),("lost", "./sounds/lost.ogg")])
 
     # Start the game
     menu_logic(win)
