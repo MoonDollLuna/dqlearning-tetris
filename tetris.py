@@ -8,12 +8,13 @@
 # IMPORTS #
 ###########
 
-import pygame
-import random
 import sys
 import argparse
 import copy
 import random
+import os.path
+
+import pygame
 
 ####################
 # GLOBAL VARIABLES #
@@ -35,7 +36,7 @@ top_left_x = 20 + block_size // 2
 top_left_y = 0
 
 # Path to the font
-font_path = "./fonts/ARCADE_N.TTF"
+font_path = os.path.join(".", "fonts", "ARCADE_N.ttf")
 
 # Tetramino representation
 
@@ -155,7 +156,7 @@ clear_color = (240, 240, 240)
 sound_gallery = {}
 
 # Path to the background song
-path_song = "./sounds/tetristhemea.mid"
+path_song = os.path.join(".", "sounds", "tetristhemea.mid")
 
 ####################
 # PLAYER VARIABLES #
@@ -483,7 +484,8 @@ def prepare_sounds(list_sounds):
 
     # For each sound in path, initialize it
     for (name, path) in list_sounds:
-        dictionary_sounds[name] = pygame.mixer.Sound(path)
+        proper_path = os.path.join(".", "sounds", path)
+        dictionary_sounds[name] = pygame.mixer.Sound(proper_path)
 
     return dictionary_sounds
 
@@ -929,7 +931,7 @@ if __name__ == "__main__":
 
     # If the sound is active, load the sounds (no need to otherwise)
     if sound_active:
-        sound_gallery = prepare_sounds([("action", "./sounds/beep.wav"), ("fall", "./sounds/fall.wav"), ("line", "./sounds/lineclear.ogg"),("lost", "./sounds/lost.ogg")])
+        sound_gallery = prepare_sounds([("action", "beep.wav"), ("fall", "fall.wav"), ("line", "lineclear.ogg"),("lost", "lost.ogg")])
 
     # Start the game
     menu_logic(win)
