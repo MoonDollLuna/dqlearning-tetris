@@ -156,7 +156,7 @@ clear_color = (240, 240, 240)
 sound_gallery = {}
 
 # Path to the background song
-path_song = os.path.join(".", "sounds", "tetristhemea.mid")
+path_song = os.path.join(".", "sounds", "tetristhemea.mp3")
 
 ####################
 # PLAYER VARIABLES #
@@ -504,10 +504,9 @@ def play_sound(sound):
 
 def play_song():
     """Starts playing the background music on loop (if sound is active)."""
-    pygame.mixer.music.load(path_song)
 
     if sound_active:
-        pygame.mixer.music.set_volume(0.5)
+        pygame.mixer.music.load(path_song)
         pygame.mixer.music.play(-1)
 
 
