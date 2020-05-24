@@ -1,5 +1,5 @@
 # CODE BY: Luna Jiménez Fernández
-# Based on the following tutorial:
+# Originally based on the following tutorial:
 # https://techwithtim.net/tutorials/game-development-with-python/tetris-pygame/tutorial-1/
 
 # The game consists of a 10 x 20 grid (standard tetris size)
@@ -14,15 +14,27 @@ import copy
 import random
 import os.path
 
+# Import used for our own agent scripts
+from agents import dql_agent
+
 import pygame
+
 
 ####################
 # GLOBAL VARIABLES #
 ####################
 
+# GRAPHICAL RELATED VARIABLES #
+
 # Window size
 screen_width = 700
 screen_height = 800
+
+# Extra window size when AI mode is active
+screen_width_extra = 300
+
+# Path to the custom font used
+font_path = os.path.join(".", "fonts", "ARCADE_N.ttf")
 
 # Block size
 block_size = 40
@@ -35,8 +47,22 @@ play_height = 20 * block_size # 20 block-high playzone
 top_left_x = 20 + block_size // 2
 top_left_y = 0
 
-# Path to the font
-font_path = os.path.join(".", "fonts", "ARCADE_N.ttf")
+# Used colors
+shape_colors = [(0, 240, 0), (240, 0, 0), (0, 240, 240), (240, 240, 0), (240, 160, 0), (0, 0, 240), (160, 0, 240)]
+background_color = (170, 170, 170)
+piece_border_color = (0, 0, 0)
+playground_border_color = (75, 75, 75)
+clear_color = (240, 240, 240)
+
+# SOUND RELATED VARIABLES #
+
+# Sound gallery
+sound_gallery = {}
+
+# Path to the background song
+path_song = os.path.join(".", "sounds", "tetristhemea.mp3")
+
+# GAMEPLAY RELATED VARIABLES
 
 # Tetramino representation
 
@@ -145,34 +171,74 @@ T = [['.....',
 # List with all the shapes
 shapes = [S, Z, I, O, J, L, T]
 
-# Used colors
-shape_colors = [(0, 240, 0), (240, 0, 0), (0, 240, 240), (240, 240, 0), (240, 160, 0), (0, 0, 240), (160, 0, 240)]
-background_color = (170, 170, 170)
-piece_border_color = (0, 0, 0)
-playground_border_color = (75, 75, 75)
-clear_color = (240, 240, 240)
+# Initial speed of the game (time between automatic piece fall, in milliseconds)
+initial_speed = 500
 
-# Sound gallery
-sound_gallery = {}
+# Speed modifier (how much the initial speed decreases each level increment, in milliseconds)
+speed_modifier = 50
 
-# Path to the background song
-path_song = os.path.join(".", "sounds", "tetristhemea.mp3")
+# Minimum speed (the maximum speed at which the game goes, in milliseconds)
+# Typically, speed increases up to 9 times
+minimum_speed = initial_speed - speed_modifier * 9
+
+# LEARNING RELATED VARIABLES #
+
+# Instantiated agent
+agent = None
 
 ####################
 # PLAYER VARIABLES #
 ####################
 
-# Sound is active or not
+# All of these variables can be set using arguments while launching the script
+# However, they're stored here to give them default values
+
+# Whether the sound is active (TRUE) or not (FALSE)
+# Set to false using --silent
 sound_active = True
 
-###################
-# INITIALIZATIONS #
-###################
+# If the player is human (FALSE) or an AI (TRUE)
+# Set using --ai play or --ai learn
+ai_player = False
 
-pygame.font.init()
-pygame.mixer.pre_init(22050, -16, 2, 32)
-pygame.init()
-pygame.mixer.init()
+# If the AI player is in playing (FALSE) or learning (TRUE) mode
+# Set using --ai learn
+ai_learning = False
+
+# Set seed for reproducibility. NONE if no seed has been set
+# Set using --seed
+seed = None
+
+# Set type of agent to be used. Default value is Standard. Only relevant when using AI (training or playing)
+# Set using --agenttype
+agent_type = 'standard'
+
+# TRAINING VARIABLES - These variables are only relevant while ai_learning is TRUE #
+
+# If the training is being done in normal, visual mode (FALSE) or in fast, text-only mode (TRUE)
+# Set using --fast
+fast_training = False
+
+# Batch size used to sample from the Experience Replay. Default value is specified below
+# Set using --batchsize
+batch_size = 100
+
+# Alpha value used by DQL (weight given to new Q value). Default value is specified below
+# Set using --alpha
+alpha = 0.5
+
+# Gamma value used by DQL (learning rate of DQL). Default value is specified below
+# Set using --gamma
+gamma = 0.6
+
+# Epsilon value used by DQL (chance to perform a random action in exploration-exploitation)
+# Default value is specified below
+# Set using --epsilon
+epsilon = 0.2
+
+# Learning rate used by the neural network. Default value is specified below
+# Set using --learningrate
+learning_rate = 0.01
 
 
 #####################
@@ -437,8 +503,17 @@ def draw_main_menu(surface):
     """
     Draws the main menu.
 
+    If AI mode is active, the menu will have some adjustments to ensure that everything is centered
+    (since the screen is bigger in AI mode)
+
     :param surface: Surface on which to draw the menu.
     """
+
+    # If AI is active, obtain the new window width
+    if ai_player:
+        screen_width_menu = screen_width + screen_width_extra
+    else:
+        screen_width_menu = screen_width
 
     # Draws the background
     surface.fill((15, 15, 15))
@@ -446,24 +521,31 @@ def draw_main_menu(surface):
     # Creates the title
     title_font = pygame.font.Font(font_path, 100)
     title_text = title_font.render('TETRIS', 1, (255, 255, 255))
-    surface.blit(title_text, (screen_width / 2 - title_text.get_width() / 2, 150 - title_text.get_height() / 2))
+    surface.blit(title_text, (screen_width_menu / 2 - title_text.get_width() / 2, 150 - title_text.get_height() / 2))
 
     # Create the subtitle
     subtitle_font = pygame.font.Font(font_path, 30)
     subtitle_text = subtitle_font.render('FOR DEEP-Q LEARNING', 1, (255, 255, 255))
-    surface.blit(subtitle_text, (screen_width / 2 - subtitle_text.get_width() / 2, 225 - subtitle_text.get_height() / 2))
+    surface.blit(subtitle_text, (screen_width_menu / 2 - subtitle_text.get_width() / 2, 225 - subtitle_text.get_height() / 2))
 
     # Create the start message
     start_font = pygame.font.Font(font_path, 30)
     start_text = start_font.render('PRESS ANY', 1, (255, 255, 255))
-    surface.blit(start_text, (screen_width / 2 - start_text.get_width() / 2, 450 - start_text.get_height() / 2))
+    surface.blit(start_text, (screen_width_menu / 2 - start_text.get_width() / 2, 450 - start_text.get_height() / 2))
     start_text2 = start_font.render('KEY TO START!', 1, (255, 255, 255))
-    surface.blit(start_text2, (screen_width / 2 - start_text2.get_width() / 2, 500 - start_text2.get_height() / 2))
+    surface.blit(start_text2, (screen_width_menu / 2 - start_text2.get_width() / 2, 500 - start_text2.get_height() / 2))
 
     # Create the developed disclaimer
     developed_font = pygame.font.Font(font_path, 15)
     developed_text = developed_font.render('DEVELOPED BY LUNA JIMENEZ FERNANDEZ', 1, (255, 255, 255))
-    surface.blit(developed_text, (screen_width / 2 - developed_text.get_width() / 2, 750 - developed_text.get_height() / 2))
+    surface.blit(developed_text, (screen_width_menu / 2 - developed_text.get_width() / 2, 750 - developed_text.get_height() / 2))
+
+    # If the player is an AI, indicate it on the main screen
+    if ai_player:
+        ai_font = pygame.font.Font(font_path, 15)
+        ai_text = ai_font.render('AI PLAYER ACTIVE', 1, (255, 255, 255))
+        surface.blit(ai_text,
+                     (screen_width_menu / 2 - ai_text.get_width() / 2, 625 - ai_text.get_height() / 2))
 
     # Draw the screen
     pygame.display.flip()
@@ -534,24 +616,24 @@ def bag_randomizer():
     return shuffled_list
 
 
-def get_shape(shapes):
+def get_shape(shapes_list):
     """
     Gets a shape from the shapes list. If it is empty, refills it using a bag randomizer.
 
-    :param shapes: List of shapes from which to get the shape.
+    :param shapes_list: List of shapes from which to get the shape.
     :return: The shape and the modified list of shapes.
     """
 
     # Check if the bag of pieces is empty
-    if len(shapes) == 0:
+    if len(shapes_list) == 0:
         # If it is, refill it with the seven pieces (in a random order)
-        shapes = bag_randomizer()
+        shapes_list = bag_randomizer()
 
     # Take the top value from the list and create the shape
-    shape = shapes.pop(0)
+    shape = shapes_list.pop(0)
     piece = Piece(5, 0, shape)
 
-    return piece, shapes
+    return piece, shapes_list
 
 
 def create_grid(locked_positions={}):
@@ -614,8 +696,13 @@ def valid_space(shape, grid):
     :return: True if the position is valid, False otherwise.
     """
 
-    # Obtain a list with all the valid positions (positions that have the background color) and flatten it
+    # Obtain a list with all the valid positions (positions that have the background color)
     accepted_pos = [[(j, i) for j in range(10) if grid[i][j] == background_color] for i in range(20)]
+    # Add an extra four layers on top (index from -4 to -1), to account for pieces above the playing area
+    # This is added to ensure that pieces that just spawned can move only in legal positions
+    extra_lines = [[(j, i) for j in range(10)] for i in range(-4, 0)]
+    accepted_pos.extend(extra_lines)
+    # Flatten everything
     accepted_pos = [j for sub in accepted_pos for j in sub]
 
     # Obtain the coordinates of the shape
@@ -625,9 +712,8 @@ def valid_space(shape, grid):
     for pos in formatted:
         # Position invalid
         if pos not in accepted_pos:
-            # If y is less than 0 (above the screen), ignore it. This will ignore pieces that have been just spawned.
-            if pos[1] > -1:
-                return False
+            return False
+
     return True
 
 
@@ -699,13 +785,48 @@ def clear_rows(grid, locked):
     return removed_lines
 
 
+#################
+# AGENT METHODS #
+#################
+
+def generate_state(locked_positions, current_piece):
+    """
+    Computes the current state from the current game grid.
+
+    The state will be store as a 20x10 matrix, where each cell can have one of the following values:
+    - 0: empty
+    - 1: occupied
+    - 2: occupied by current piece
+
+    :param locked_positions: The current grid of the game
+    :param current_piece: The current piece being played
+    :return: The processed state
+    """
+
+    # Generate the initial grid (all 0s)
+    grid = [[0 for _ in range(10)] for _ in range(20)]
+
+    # For all positions in the locked grid, change the value to 1
+    for (j, i) in locked_positions.keys():
+        grid[i][j] = 1
+
+    # Obtain the positions of the current piece and change them to 2
+    piece_positions = generate_shape_positions(current_piece)
+    for (x, y) in piece_positions:
+        grid[y][x] = 2
+
+    return grid
+
+
 ##################
 # MAIN FUNCTIONS #
 ##################
 
-def main(win):
+def main_human_player(win):
     """
-    Main logic of the game.
+    Main logic of the game when a human player is active
+
+    AI players and training modes have their own separate logic, adapted to the specific necessities
 
     :param win: Surface used to draw all the elements.
     """
@@ -717,9 +838,7 @@ def main(win):
 
     # Speed at which the pieces fall (to be updated during the loop)
     # Speed can be increased up to 9 times at most
-    initial_speed = 0.5
-    fall_speed = initial_speed
-    speed_modifier = 0.05
+    current_speed = initial_speed
 
     # Score, lines cleared and level reached
     score = 0
@@ -737,7 +856,8 @@ def main(win):
     current_piece, randomizer_shapes = get_shape(randomizer_shapes)
     next_piece, randomizer_shapes = get_shape(randomizer_shapes)
 
-    # Initializes the clock and the counters
+    # Initializes the clock and the time counters
+    # (The human player uses a real-time clock)
     clock = pygame.time.Clock()
     fall_time = 0
     level_time = 0
@@ -771,14 +891,14 @@ def main(win):
                     run = False
                     stop_sounds()
 
-                # Left key (move left and play the appropiate sound)
+                # Left key (move left and play the appropriate sound)
                 if event.key == pygame.K_LEFT:
                     current_piece.x -= 1
                     if not valid_space(current_piece, grid):
                         current_piece.x += 1
                     play_sound("action")
 
-                # Right key (move right and play the appropiate sound)
+                # Right key (move right and play the appropriate sound)
                 if event.key == pygame.K_RIGHT:
                     current_piece.x += 1
                     if not valid_space(current_piece, grid):
@@ -803,7 +923,7 @@ def main(win):
                     # After a hard drop, piece will be guaranteed to be locked
                     change_piece = True
 
-                # R key (rotation and play the appropiate sound)
+                # R key (rotation and play the appropriate sound)
                 if event.key == pygame.K_r:
                     current_piece.rotation += 1
                     if not valid_space(current_piece, grid):
@@ -811,7 +931,7 @@ def main(win):
                     play_sound("action")
 
         # Clock calculations (piece falling)
-        if fall_time/1000 > fall_speed:
+        if fall_time > current_speed:
             fall_time = 0
             current_piece.y += 1
             if not valid_space(current_piece, grid) and current_piece.y > 0:
@@ -844,9 +964,10 @@ def main(win):
             lines += len(lines_cleared)
             level = lines // 10
 
-            fall_speed = initial_speed - speed_modifier * level
-            if fall_speed < 0.05:
-                fall_speed = 0.05
+            current_speed = initial_speed - speed_modifier * level
+            # Ensure that the speed doesn't go below a limit
+            if current_speed < minimum_speed:
+                current_speed = 0.05
 
             # Play the piece lock sound
             play_sound("fall")
@@ -868,6 +989,8 @@ def main(win):
                 # Compute the score to add
                 multiplier = 0
                 buffer = len(lines_cleared)
+                # This increases exponentially the multiplier depending on lines
+                # 1 line = x1, 2 lines = x3, 3 lines = x6, 4 lines = x10
                 while buffer > 0:
                     multiplier += buffer
                     buffer -= 1
@@ -881,6 +1004,7 @@ def main(win):
         draw_manager(win, grid, current_piece, next_piece, score, level, lines)
         pygame.display.flip()
 
+        # Check if the game has ended
         if check_defeat(locked_positions):
             stop_sounds()
             play_sound("lost")
@@ -891,6 +1015,7 @@ def main(win):
 def menu_logic(win):
     """
     Function that draws the main menu of the game.
+    Depending on the type of player (human or AI), a different game logic will be launched
 
     :param win: Surface to draw everything on.
     """
@@ -912,10 +1037,13 @@ def menu_logic(win):
                 # If escape is pressed, close the game
                 if event.key == pygame.K_ESCAPE:
                     run = False
-                # Else, start the game
+                # Else, start the appropriate game logic depending on the type of player
                 else:
-                    main(win)
-                    pygame.event.clear()
+                    if not ai_player:
+                        main_human_player(win)
+                        pygame.event.clear()
+                    else:
+                        pass
 
     # When closed, exit everything in an ordered way
     pygame.display.quit()
@@ -925,12 +1053,203 @@ def menu_logic(win):
 
 # Code to be executed if called directly
 if __name__ == "__main__":
-    win = pygame.display.set_mode((screen_width, screen_height))
+
+    # Create the argument parser
+    parser = argparse.ArgumentParser(description="Starts a game of TETRIS for a human player with sound."
+                                                 "\nThe game can be customized by indicating arguments")
+
+    ####################################
+    # ARGUMENTS - PLAYER-SET VARIABLES #
+    ####################################
+
+    # NOTE: All arguments are optional
+    # By default, launching the script without arguments will start the game for a human player with sound.
+
+    # SILENT (-sil or --silent) - If the argument is present, the game will be soundless
+    parser.add_argument('-sil',
+                        '--silent',
+                        action='store_true',
+                        help="Disables sound for the game")
+
+    # AI (-ai or --ai) - The game will be played by an artificial intelligence
+    # Possible values:
+    # - 'play' - The AI will use pre-defined weights to play the game
+    # - 'learn' - The AI will use DQL to learn the weights
+
+    parser.add_argument('-ai',
+                        '--ai',
+                        choices=['play', 'learn'],
+                        help="Sets an AI as the player ('play' for the AI to use predefined weights, "
+                             "'learn' for the AI to learn using DQL)")
+
+    # SEED (-s or --seed) - Sets the seed for all random events
+    # Value is introduced by the user, and is mostly used to guarantee reproducibility during training
+    # If not set, a random seed will be used instead
+
+    parser.add_argument('-s',
+                        '--seed',
+                        type=int,
+                        help="Sets a seed for all random events. Note that reproducibility is not totally guaranteed "
+                             "due to Keras.")
+
+    # AGENT TYPE (-at or --agenttype) - Specifies the type of agent that will be used to play the game
+    # Possible values:
+    # - 'standard' - (DEFAULT) The AI logic will be the standard DQL agent logic (with a basic neural network)
+
+    parser.add_argument('-at',
+                        '--agenttype',
+                        choices=['standard'],
+                        help="(AI ONLY) Sets the type of agent to be used. DEFAULT: Standard")
+
+    # FAST TRAINING (-f or --fast) - Only for training. If the argument is present, the training will be done in
+    # fast mode (no graphics will be displayed and time will run faster, to allow to train while in the background)
+
+    parser.add_argument('-f',
+                        '--fast',
+                        action='store_true',
+                        help="(LEARNING ONLY) Trains the network in fast mode (without rendering "
+                             "any graphics and with sped-up time)")
+
+    # BATCH SIZE (-b or --batch) - Only for training. Specifies how many experiences are taken from the
+    # experience replay to train at once.
+    # Value is introduced by the user (must be between 1 and 2000). Default value if not specified is 100
+
+    parser.add_argument('-b',
+                        '--batchsize',
+                        type=int,
+                        help="(LEARNING ONLY) Sets how many experiences will be taken from the experience replay at "
+                             "once while learning. Must be between 1 and 2000. DEFAULT = " + str(batch_size))
+
+    # ALPHA (-a or --alpha) - Initial value for the alpha variable (weight given to the new value during Q-learning)
+    # Value is introduced by the user (must be between 0 and 1).
+
+    parser.add_argument('-a',
+                        '--alpha',
+                        type=float,
+                        help="(LEARNING ONLY) Sets a value for the alpha variable (weight given to the new value "
+                             "during Q-learning). Must be between 0 and 1. DEFAULT = " + str(alpha))
+
+    # GAMMA (-g or --gamma) - Initial value for the gamma variable (discount factor,
+    # importance given to future rewards in Q-learning)
+    # Value is introduced by the user.
+
+    parser.add_argument('-g',
+                        '--gamma',
+                        type=float,
+                        help="(LEARNING ONLY) Sets a value for the gamma variable (discount factor, importance given "
+                             "to future rewards in Q-learning). DEFAULT = " + str(gamma))
+
+    # EPSILON (-e or --epsilon) - Initial variable for the epsilon variable (initial chance for a random action during
+    # learning with Deep Q-Learning (part of the exploration-exploitation principle)
+    # Value is introduced by the user (must be between 0 and 1). Default value if not specified is 0.8
+
+    parser.add_argument('-e',
+                        '--epsilon',
+                        type=float,
+                        help="(LEARNING ONLY) Sets a value for the epsilon variable (initial chance to take a random "
+                             "action during learning, part of exploration-exploitation). Must be between 0 and 1. "
+                             "DEFAULT = " + str(epsilon))
+
+    # LEARNING RATE (-lr or --learningrate) - Initial for the learning rate of the optimizer (how much new experiences
+    # are valued in the neural network)
+    # Value is introduced by the user. Default value if not specified is 0.01
+    parser.add_argument('-lr',
+                        '--learningrate',
+                        type=float,
+                        help="(LEARNING ONLY) Sets a value for the learning rate (value given to new samples in the "
+                             "neural network). DEFAULT = " + str(learning_rate))
+
+    # Parse the arguments
+    arguments = vars(parser.parse_args())
+
+    if arguments['silent']:
+        sound_active = False
+
+    if arguments['ai'] is not None:
+        ai_player = True
+        if arguments['ai'] == 'learn':
+            ai_learning = True
+
+    if arguments['seed'] is not None:
+        seed = arguments['seed']
+        # Sets the seed
+        random.seed(seed)
+
+    if arguments['agenttype'] is not None:
+        agent_type = arguments['agenttype']
+
+    if arguments['fast']:
+        fast_training = True
+
+    if arguments['batchsize'] is not None:
+        batch_size = arguments['batchsize']
+        if batch_size < 1 or batch_size > 2000:
+            raise ValueError("Batch size must be between 1 and 2000")
+
+    if arguments['alpha'] is not None:
+        alpha = arguments['alpha']
+        if alpha < 0.0 or alpha > 1.0:
+            raise ValueError("Alpha must be between 0.0 and 1.0")
+
+    if arguments['gamma'] is not None:
+        gamma = arguments['gamma']
+
+    if arguments['epsilon'] is not None:
+        epsilon = arguments['epsilon']
+        if epsilon < 0.0 or epsilon > 1.0:
+            raise ValueError("Epsilon must be between 0.0 and 1.0")
+
+    if arguments['learningrate'] is not None:
+        learning_rate = arguments['learningrate']
+
+    # Initialize pygame
+    pygame.font.init()
+    pygame.mixer.pre_init(22050, -16, 2, 32)
+    pygame.init()
+    pygame.mixer.init()
+
+    # Prepare the game window
+    # (the window will be wider if an AI player is active)
+    if ai_player:
+        win = pygame.display.set_mode((screen_width + screen_width_extra, screen_height))
+    else:
+        win = pygame.display.set_mode((screen_width, screen_height))
+
     pygame.display.set_caption("DQL - TETRIS")
 
     # If the sound is active, load the sounds (no need to otherwise)
     if sound_active:
-        sound_gallery = prepare_sounds([("action", "beep.wav"), ("fall", "fall.wav"), ("line", "lineclear.ogg"),("lost", "lost.ogg")])
+        sound_gallery = prepare_sounds([
+            ("action", "beep.wav"),
+            ("fall", "fall.wav"),
+            ("line", "lineclear.ogg"),
+            ("lost", "lost.ogg")])
 
-    # Start the game
-    menu_logic(win)
+    # Start the appropriate logic, depending on the type of player (human, AI learning or AI playing)
+
+    # Check if there is an AI player
+    if ai_player:
+        
+        # Ensure first a proper value of epsilon: epsilon should be 0 is the AI is a player
+        # (we want to strictly follow the policy)
+        if not ai_learning:
+            epsilon = 0
+
+        # AI player present: instantiate the appropriate agent
+        # A switch case statement would be used here, but since Python does not implement it,
+        # if elses will be used instead
+        if agent_type == 'standard':
+            agent = dql_agent.DQLAgent(learning_rate,
+                                       alpha,
+                                       gamma,
+                                       epsilon,
+                                       batch_size,
+                                       seed)
+
+    # If the game is in learning mode, directly launch the game (without the main menu)
+    if ai_learning:
+        # TODO AQUI FALTA
+        pass
+    # Otherwise, launch the main menu
+    else:
+        menu_logic(win)
