@@ -27,12 +27,11 @@ class DQLAgent:
     - Epsilon-greedy policy for selecting the action (exploration-exploitation)
     """
 
-    def __init__(self, learning_rate, alpha, gamma, epsilon, batch_size, seed):
+    def __init__(self, learning_rate, gamma, epsilon, batch_size, seed):
         """
         Constructor of the class. Creates an agent from the specified information
 
         :param learning_rate: Learning rate for the model
-        :param alpha: Initial alpha value (weight given to the new value)
         :param gamma: Initial gamma value (discount factor, importance given to future rewards)
         :param epsilon: Initial epsilon value (chance for a random action in exploration-exploitation)
         :param batch_size: How many actions will be sampled at once
@@ -44,11 +43,9 @@ class DQLAgent:
             0: 'right',
             1: 'left',
             2: 'rotate',
-            3: 'drop'
+            3: 'hard_drop'
         }
 
-        # Set the values of the algorithm variables
-        self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
 
@@ -105,9 +102,9 @@ class DQLAgent:
                                kernel_initializer=glorot_uniform(seed=self.seed))
 
         # Output layer has 4 neurons (one for each possible action)
-        # Activation function is softmax (converts values into a probability, adding all outputs returns 1)
+        # Activation function is linear (instead of the usual softmax): we want Q-Values, not probabilities
         output_layer = Dense(len(self.actions),
-                             activation="softmax",
+                             activation="linear",
                              kernel_initializer=glorot_uniform(seed=self.seed))
 
         # Create the sequential model
@@ -165,24 +162,37 @@ class DQLAgent:
             # Train the network (verbose 0 to ensure that no messages are shown)
             self.q_network.fit(state, train, epochs=1, verbose=0)
 
+    def _add_extra_dimension(self, state):
+        """
+        Adds an extra dimension to a state, transforming it into Keras format
+
+        :param state: Original state to transform
+        :return: Transformed state (with an extra dimension)
+        """
+
+        return np.expand_dims(state, axis=0)
+
     def act(self, state):
         """
         For the current state, return the optimal action to take or a random action randomly
         :param state: The current state provided by the game
-        :return: The action taken (as a string)
+        :return: The action taken (as a string) and, if applicable, the set of chances for each action
         """
 
         # Generate a random number
         random_chance = np.random.rand()
 
+        # Prepare the state to pass through the neural network
+        state = self._add_extra_dimension(state)
+
         # Check if the value is smaller (random action) or greater (optimal action) than epsilon
         if random_chance < self.epsilon:
             # Take a random action from the actions dictionary
-            return np.random.choice(self.actions.values())
+            return np.random.choice(self.actions.values()), None
         else:
             # Take the optimal action
             q_values = self.q_network.predict(state)
-            return self.actions[np.argmax(q_values[0])]
+            return self.actions[np.argmax(q_values[0])], q_values
 
     def insert_experience(self, state, action, reward, next_state, terminated):
         """

@@ -14,6 +14,8 @@ import copy
 import random
 import os.path
 
+import numpy as np
+
 # Import used for our own agent scripts
 from agents import dql_agent
 
@@ -175,7 +177,7 @@ shapes = [S, Z, I, O, J, L, T]
 initial_speed = 500
 
 # Speed modifier (how much the initial speed decreases each level increment, in milliseconds)
-speed_modifier = 50
+speed_modifier = 40
 
 # Minimum speed (the maximum speed at which the game goes, in milliseconds)
 # Typically, speed increases up to 9 times
@@ -184,7 +186,11 @@ minimum_speed = initial_speed - speed_modifier * 9
 # LEARNING RELATED VARIABLES #
 
 # Instantiated agent
+# (Stored as a global variable, so it survives through loops and can always be accessed)
 agent = None
+
+# Polling speed (how often the agent acts, in milliseconds)
+polling_speed = 100
 
 ####################
 # PLAYER VARIABLES #
@@ -222,10 +228,6 @@ fast_training = False
 # Batch size used to sample from the Experience Replay. Default value is specified below
 # Set using --batchsize
 batch_size = 100
-
-# Alpha value used by DQL (weight given to new Q value). Default value is specified below
-# Set using --alpha
-alpha = 0.5
 
 # Gamma value used by DQL (learning rate of DQL). Default value is specified below
 # Set using --gamma
@@ -789,14 +791,146 @@ def clear_rows(grid, locked):
 # AGENT METHODS #
 #################
 
+# GRAPHICS #
+
+def draw_ai_information(surface, current_state, q_values):
+    """
+    Draws relevant information for the AI player (in order to visualize the choices being taken)
+
+    :param surface: Surface in which to draw the information.
+    :param current_state: Last state received by the agent, to be displayed on screen
+    :param q_values: Q-Value of every action
+    """
+
+    # Create a rectangle for the additional HUD
+    pygame.draw.rect(surface, background_color, (screen_width, 0, screen_width_extra, screen_height), 0)
+    pygame.draw.rect(surface, playground_border_color, (screen_width, 0, screen_width_extra, screen_height), 5)
+
+    # Identify where to place the additional AI HUD
+    hud_begin_x = screen_width + 25
+
+    # Create two fonts
+    small_font = pygame.font.Font(font_path, 20)
+    big_font = pygame.font.Font(font_path, 30)
+
+    # STATE
+    state_y = 15
+
+    # Write the state title and print it
+    state_text = big_font.render('STATE', 1, (0, 0, 0))
+    surface.blit(state_text, (hud_begin_x + ((screen_width + screen_width_extra) - hud_begin_x - 25) // 2 - state_text.get_width() / 2,
+                              state_y + 25 - state_text.get_height() / 2))
+
+    # Draw the state itself
+
+    # Initial positions and size of each block
+    state_initial_x = screen_width + 75
+    state_initial_y = 70
+    state_block_size = 15
+
+    # Draw a rectangle behind the state
+    pygame.draw.rect(surface, playground_border_color, (state_initial_x - 5, state_initial_y - 5, state_block_size * 10 + 10, state_block_size * 20 + 10), 0)
+
+    # Loop through all elements of the state
+    for (y, x), element in np.ndenumerate(current_state):
+
+        # Set the color depending on the value of the element
+        # (0 is black, 1 is gray, 2 is white)
+        if element == 0:
+            color = (0, 0, 0)
+        elif element == 1:
+            color = (128, 128, 128)
+        else:
+            color = (255, 255, 255)
+
+        # Draw the actual square in the appropiate position
+        pygame.draw.rect(surface,
+                         color,
+                         (state_initial_x + x * state_block_size,
+                          state_initial_y + y * state_block_size,
+                          state_block_size,
+                          state_block_size),
+                         0)
+
+    # ACTION Q-VALUES:
+    qvalues_y = 380
+
+    # Draw a black rectangle for all Q values
+    pygame.draw.rect(surface,
+                     playground_border_color,
+                     (screen_width,
+                      qvalues_y,
+                      screen_width_extra,
+                      300),
+                     0)
+
+    # Draw the title
+    qvalues_text = big_font.render('Q-VALUES', 1, (0, 0, 0))
+    surface.blit(qvalues_text, (hud_begin_x + ((screen_width + screen_width_extra) - hud_begin_x - 25) // 2 - qvalues_text.get_width() / 2, qvalues_y + 25 - qvalues_text.get_height() / 2))
+
+    # Find the action with the biggest Q-Value
+    best_action = np.argmax(q_values[0])
+
+    # Draw the text for each action and its Q-Value
+    # The order followed is respected by the agent
+    # If the text has the highest Q value, a rectangle will be drawn behind
+
+    # Draw a rectangle for the best action
+    pygame.draw.rect(surface,
+                     background_color,
+                     (screen_width,
+                      qvalues_y + 50 + best_action * 60,
+                      screen_width_extra,
+                      60),
+                     0)
+
+    # RIGHT
+    right_text = small_font.render('RIGHT:', 1, (0, 0, 0))
+    surface.blit(right_text, (hud_begin_x, qvalues_y + 50))
+
+    # Right content
+    right_content_text = small_font.render(str(q_values[0][0]), 1, (0, 0, 0))
+    surface.blit(right_content_text, (hud_begin_x + ((screen_width + screen_width_extra) - hud_begin_x - 25) // 2 - right_content_text.get_width() / 2, qvalues_y + 80))
+
+    # LEFT
+    left_text = small_font.render('LEFT:', 1, (0, 0, 0))
+    surface.blit(left_text, (hud_begin_x, qvalues_y + 110))
+
+    # Left content
+    left_content_text = small_font.render(str(q_values[0][1]), 1, (0, 0, 0))
+    surface.blit(left_content_text, (hud_begin_x + ((screen_width + screen_width_extra) - hud_begin_x - 25) // 2 - left_content_text.get_width() / 2, qvalues_y + 140))
+
+    # ROTATE
+    rotate_text = small_font.render('ROTATE:', 1, (0, 0, 0))
+    surface.blit(rotate_text, (hud_begin_x, qvalues_y + 170))
+
+    # Rotate content
+    rotate_content_text = small_font.render(str(q_values[0][2]), 1, (0, 0, 0))
+    surface.blit(rotate_content_text, (hud_begin_x + ((screen_width + screen_width_extra) - hud_begin_x - 25) // 2 - rotate_content_text.get_width() / 2, qvalues_y + 200))
+
+    # HARD DROP
+    harddrop_text = small_font.render('HARD DROP:', 1, (0, 0, 0))
+    surface.blit(harddrop_text, (hud_begin_x, qvalues_y + 230))
+
+    # Rotate content
+    harddrop_content_text = small_font.render(str(q_values[0][3]), 1, (0, 0, 0))
+    surface.blit(harddrop_content_text, (hud_begin_x + ((screen_width + screen_width_extra) - hud_begin_x - 25) // 2 - harddrop_content_text.get_width() / 2, qvalues_y + 260))
+
+
+# GAMEPLAY #
+
 def generate_state(locked_positions, current_piece):
     """
     Computes the current state from the current game grid.
 
-    The state will be store as a 20x10 matrix, where each cell can have one of the following values:
+    The state will be store as a 20x10 numpy matrix, where each cell can have one of the following values:
     - 0: empty
     - 1: occupied
     - 2: occupied by current piece
+
+    In order to not give the AI more information than what a human player would have, only the positions that can be
+    viewed will be included into the state. This means that the four rows ABOVE the screen (where the piece spawns)
+    are NOT included
 
     :param locked_positions: The current grid of the game
     :param current_piece: The current piece being played
@@ -813,22 +947,30 @@ def generate_state(locked_positions, current_piece):
     # Obtain the positions of the current piece and change them to 2
     piece_positions = generate_shape_positions(current_piece)
     for (x, y) in piece_positions:
-        grid[y][x] = 2
+        # Ignore negative positions (they're still out of bounds)
+        if x >= 0 and y >= 0:
+            grid[y][x] = 2
 
-    return grid
+    return np.array(grid)
 
 
-##################
-# MAIN FUNCTIONS #
-##################
+###############################
+# MAIN LOOP AUXILIARY METHODS #
+###############################
 
-def main_human_player(win):
+# These methods are the main loop methods shared between all instances of the main game loop
+# (human player, AI player or AI learner)
+# TODO REVISA ESTOS METODOS JULIA A VER QUE TE PARECE
+
+def initialize_game():
     """
-    Main logic of the game when a human player is active
+    Initializes all necessary variables for the main game loop, and returns them
 
-    AI players and training modes have their own separate logic, adapted to the specific necessities
+    This has been taken into a separate method since it is shared by all three loops
 
-    :param win: Surface used to draw all the elements.
+    :returns tuple(locked_positions, current_speed, score, lines, level, change_piece, run, randomizer_shapes,
+            current_piece, next_piece, clock, fall_time, level_time)
+            (meaning of each value explained in the code)
     """
 
     # Variables used by the main loop #
@@ -862,7 +1004,420 @@ def main_human_player(win):
     fall_time = 0
     level_time = 0
 
-    # Start playing the song
+    # Start playing the song (if sound is active)
+    play_song()
+
+    # Return all initialized variables
+    return (locked_positions, current_speed, score, lines, level, change_piece, run, randomizer_shapes,
+            current_piece, next_piece, clock, fall_time, level_time)
+
+
+def process_inputs(inputs, current_piece, grid):
+    """
+    Given a list of inputs, processes them and applies them to the board
+
+    Note that inputs (even if there is only one input) must be passed as a list.
+    Also note that the ESC input must be processed outside of this method (since it breaks the loop)
+
+    :param inputs: List containing all inputs to be processed
+    :param current_piece: Piece currently in play
+    :param grid: Current grid of the game
+    :return: Updated current_piece, grid and change_piece
+    """
+
+    # Sets the change_piece to False (change_piece computes if the piece should be locked or not,
+    # only the hard drop action instantly locks a piece)
+    change_piece = False
+
+    # Loop through the list of actions
+    for action in inputs:
+
+        # Left (move left and play the appropriate sound)
+        if action == "left":
+            current_piece.x -= 1
+            if not valid_space(current_piece, grid):
+                current_piece.x += 1
+            play_sound("action")
+
+        # Right (move right and play the appropriate sound)
+        if action == "right":
+            current_piece.x += 1
+            if not valid_space(current_piece, grid):
+                current_piece.x -= 1
+            play_sound("action")
+
+        # Soft drop (moves the piece down a position)
+        if action == "soft_drop":
+            current_piece.y += 1
+            if not valid_space(current_piece, grid):
+                current_piece.y -= 1
+
+        # Hard / instant drop (instantly moves the piece to the lowest position it can move)
+        if action == "hard_drop":
+            # Try to move the piece down until an illegal position is reached, and then move upwards to reach
+            # the final valid position
+            while valid_space(current_piece, grid):
+                current_piece.y += 1
+            current_piece.y -= 1
+
+            # After a hard drop, piece will be guaranteed to be locked
+            change_piece = True
+
+        # Rotation (rotates the piece into the next rotation)
+        if action == "rotate":
+            current_piece.rotation += 1
+            if not valid_space(current_piece, grid):
+                current_piece.rotation -= 1
+            play_sound("action")
+
+    # Returns all values
+    return current_piece, grid, change_piece
+
+
+def place_piece(current_piece, grid):
+    """
+    Inserts the current piece into the grid
+
+    :param current_piece: Piece currently in play
+    :param grid: Current state of the grid
+    :return: Updated grid and shape_pos (current_piece converted into grid positions)
+    """
+
+    shape_pos = generate_shape_positions(current_piece)
+    for i in range(len(shape_pos)):
+        x, y = shape_pos[i]
+        if y > -1:
+            grid[y][x] = current_piece.color
+
+    return grid, shape_pos
+
+
+#####################
+# MAIN LOOP METHODS #
+#####################
+
+def main_human_player(win):
+    """
+    Main logic of the game when a human player is active
+
+    AI players and training modes have their own separate logic, adapted to the specific necessities
+
+    :param win: Surface used to draw all the elements.
+    """
+
+    # Initialize all necessary variables
+    (locked_positions, current_speed, score, lines, level, change_piece, run, randomizer_shapes, current_piece,
+     next_piece, clock, fall_time, level_time) = initialize_game()
+
+    # While the game is not over (main logic loop)
+    while run:
+
+        # Create the grid and update all the clocks, marking a new tick
+        grid = create_grid(locked_positions)
+        fall_time += clock.get_rawtime()
+        level_time += clock.get_rawtime()
+        clock.tick()
+
+        # Create a list to contain all processed inputs
+        actions = []
+
+        # Process all the player inputs
+        for event in pygame.event.get():
+
+            # Window has been closed
+            if event.type == pygame.QUIT:
+                pygame.display.quit()
+                pygame.quit()
+                sys.exit()
+
+            # Key has been pressed
+            if event.type == pygame.KEYDOWN:
+
+                # ESC key (exit to main menu)
+                if event.key == pygame.K_ESCAPE:
+                    run = False
+                    stop_sounds()
+
+                # Left key (left action)
+                if event.key == pygame.K_LEFT:
+                    actions.append("left")
+
+                # Right key (right action)
+                if event.key == pygame.K_RIGHT:
+                    actions.append("right")
+
+                # Down key (soft drop action)
+                if event.key == pygame.K_DOWN:
+                    actions.append("soft_drop")
+
+                # Up key (hard/instant drop action)
+                if event.key == pygame.K_UP:
+                    actions.append("hard_drop")
+
+                # R key (rotation and play the appropriate sound)
+                if event.key == pygame.K_r:
+                    actions.append("rotate")
+
+        # Execute all processed inputs
+        current_piece, grid, change_piece = process_inputs(actions, current_piece, grid)
+
+        # Clock calculations (make the piece fall)
+        if fall_time > current_speed:
+            fall_time = 0
+            current_piece.y += 1
+            # If, after lowering the piece, it reaches an invalid position, it has touched another piece: lock it
+            if not valid_space(current_piece, grid) and current_piece.y > 0:
+                current_piece.y -= 1
+                change_piece = True
+
+        # Place the current piece into the grid
+        grid, shape_pos = place_piece(current_piece, grid)
+
+        # If the piece has been locked in place
+        if change_piece:
+
+            # Add the current piece to locked positions (conserving the biggest y value)
+            # The biggest Y value is stored to compute the score later
+            shape_y = -1
+            for pos in shape_pos:
+                if pos[1] > shape_y:
+                    shape_y = pos[1]
+                p = (pos[0], pos[1])
+                locked_positions[p] = current_piece.color
+
+            # Get the next piece
+            current_piece = next_piece
+            next_piece, randomizer_shapes = get_shape(randomizer_shapes)
+
+            # Update lines, level and speed
+            lines_cleared = clear_rows(grid, locked_positions)
+            lines += len(lines_cleared)
+            level = lines // 10
+
+            current_speed = initial_speed - speed_modifier * level
+            # Ensure that the speed doesn't go below a limit
+            if current_speed < minimum_speed:
+                current_speed = minimum_speed
+
+            # Play the piece lock sound
+            play_sound("fall")
+
+            # Update score
+            if len(lines_cleared) == 0:
+                # No lines cleared
+                score += shape_y + 1
+            else:
+                # One or more lines cleared
+
+                # Play the appropriate sound. Sound is played before the effect is drawn to ensure it's not delayed
+                play_sound("line")
+
+                # Draw the screen first (to ensure the piece is displayed on its proper place) and then draw the effect
+                draw_manager(win, grid, current_piece, next_piece, score, level, lines - len(lines_cleared))
+                draw_clear_row(win, lines_cleared)
+
+                # Compute the score to add
+                multiplier = 0
+                buffer = len(lines_cleared)
+                # This increases exponentially the multiplier depending on lines
+                # 1 line = x1, 2 lines = x3, 3 lines = x6, 4 lines = x10
+                while buffer > 0:
+                    multiplier += buffer
+                    buffer -= 1
+                score += (level + 1) * multiplier * 100
+
+            # Tick the clock again, to ensure that no time is lost due to the processing
+            clock.tick()
+
+        # Draw everything and update the screen
+        draw_manager(win, grid, current_piece, next_piece, score, level, lines)
+        pygame.display.flip()
+
+        # Check if the game has ended
+        if check_defeat(locked_positions):
+            stop_sounds()
+            play_sound("lost")
+            draw_game_over_effect(win)
+            run = False
+
+
+def main_ai_player(win):
+    """
+    Main logic of the game when a AI player is active
+
+    The main differences are that the actions are now polled from the agent instead of from the user inputs
+
+    :param win: Surface used to draw all the elements.
+    """
+
+    # Initialize all necessary variables
+    (locked_positions, current_speed, score, lines, level, change_piece, run, randomizer_shapes, current_piece,
+     next_piece, clock, fall_time, level_time) = initialize_game()
+
+    # AI: Poll time is used to check for the AI player actions
+    poll_time = 0
+
+    # AI: Keep Action and Q-Values outside of the loop (to keep their values)
+    # They are initialized with placeholder values
+    action = None
+    q_values = np.array([[0, 0, 0, 0]])
+
+    # While the game is not over (main logic loop)
+    while run:
+
+        # Create the grid and update all the clocks, marking a new tick
+        grid = create_grid(locked_positions)
+        fall_time += clock.get_rawtime()
+        level_time += clock.get_rawtime()
+        poll_time += clock.get_rawtime()
+        clock.tick()
+
+        # Check if the player has exited the game or has pressed the ESC key
+        for event in pygame.event.get():
+
+            # Window has been closed
+            if event.type == pygame.QUIT:
+                pygame.display.quit()
+                pygame.quit()
+                sys.exit()
+
+            # Key has been pressed
+            if event.type == pygame.KEYDOWN:
+
+                # ESC key (exit to main menu)
+                if event.key == pygame.K_ESCAPE:
+                    run = False
+                    stop_sounds()
+
+        # Prepare the current state for the AI
+        current_state = generate_state(locked_positions, current_piece)
+
+        # Clock calculations
+        # The order of these calculations is relevant. The movement must be polled first always
+        # This ensures it remains consistent with the human behaviour (movement first, locking second)
+
+        # 1 - If needed, poll the agent for an action and execute it
+        if poll_time > polling_speed:
+            poll_time = 0
+            action, q_values = agent.act(current_state)
+            process_inputs([action], current_piece, grid)
+
+        # 2 - If needed, move the piece downwards
+        if fall_time > current_speed:
+            fall_time = 0
+            current_piece.y += 1
+            if not valid_space(current_piece, grid) and current_piece.y > 0:
+                current_piece.y -= 1
+                change_piece = True
+
+        # Place the current piece into the grid
+        grid, shape_pos = place_piece(current_piece, grid)
+
+        # If the piece has been locked in place
+        if change_piece:
+            # Add the current piece to locked positions (conserving the biggest y value)
+            shape_y = -1
+            for pos in shape_pos:
+                if pos[1] > shape_y:
+                    shape_y = pos[1]
+                p = (pos[0], pos[1])
+                locked_positions[p] = current_piece.color
+
+            # Get the next piece
+            current_piece = next_piece
+            next_piece, randomizer_shapes = get_shape(randomizer_shapes)
+
+            # Update lines, level and speed
+            lines_cleared = clear_rows(grid, locked_positions)
+            lines += len(lines_cleared)
+            level = lines // 10
+
+            current_speed = initial_speed - speed_modifier * level
+            # Ensure that the speed doesn't go below a limit
+            if current_speed < minimum_speed:
+                current_speed = 0.05
+
+            # Play the piece lock sound
+            play_sound("fall")
+
+            # Update score
+            if len(lines_cleared) == 0:
+                # No lines cleared
+                score += shape_y + 1
+            else:
+                # One or more lines cleared
+
+                # Play the appropriate sound. Sound is played before the effect is drawn to ensure it's not delayed
+                play_sound("line")
+
+                # Draw the screen first (to ensure the piece is displayed on its proper place) and then draw the effect
+                draw_manager(win, grid, current_piece, next_piece, score, level, lines - len(lines_cleared))
+                draw_clear_row(win, lines_cleared)
+
+                # Compute the score to add
+                multiplier = 0
+                buffer = len(lines_cleared)
+                # This increases exponentially the multiplier depending on lines
+                # 1 line = x1, 2 lines = x3, 3 lines = x6, 4 lines = x10
+                while buffer > 0:
+                    multiplier += buffer
+                    buffer -= 1
+                score += (level + 1) * multiplier * 100
+
+            # Prepare everything for the next loop
+            change_piece = False
+            clock.tick()
+
+        # Draw everything (original HUD and AI HUD)
+        draw_manager(win, grid, current_piece, next_piece, score, level, lines)
+        draw_ai_information(win, current_state, q_values)
+        # Update the screen
+        pygame.display.flip()
+
+        # Check if the game has ended
+        if check_defeat(locked_positions):
+            stop_sounds()
+            play_sound("lost")
+            draw_game_over_effect(win)
+            run = False
+
+
+def OLD(win):
+
+    # Variables used by the main loop #
+
+    # Grid with all the locked positions
+    locked_positions = {}
+
+    # Speed at which the pieces fall (to be updated during the loop)
+    # Speed can be increased up to 9 times at most
+    current_speed = initial_speed
+
+    # Score, lines cleared and level reached
+    score = 0
+    lines = 0
+    level = 0
+    # Piece is locked, need a new piece
+    change_piece = False
+    # Game is still running
+    run = True
+
+    # Generates an initial list of shapes
+    randomizer_shapes = bag_randomizer()
+
+    # Get the initial piece and the initial next piece
+    current_piece, randomizer_shapes = get_shape(randomizer_shapes)
+    next_piece, randomizer_shapes = get_shape(randomizer_shapes)
+
+    # Initializes the clock and the time counters
+    # (AI player uses a real-time clock)
+    clock = pygame.time.Clock()
+    fall_time = 0
+    level_time = 0
+    # Poll time is used to check for the AI player actions
+    poll_time = 0
+
+    # Start playing the song (if sound is active)
     play_song()
 
     # While the game is not over (main logic loop)
@@ -1043,7 +1598,8 @@ def menu_logic(win):
                         main_human_player(win)
                         pygame.event.clear()
                     else:
-                        pass
+                        main_ai_player(win)
+                        pygame.event.clear()
 
     # When closed, exit everything in an ordered way
     pygame.display.quit()
@@ -1120,15 +1676,6 @@ if __name__ == "__main__":
                         help="(LEARNING ONLY) Sets how many experiences will be taken from the experience replay at "
                              "once while learning. Must be between 1 and 2000. DEFAULT = " + str(batch_size))
 
-    # ALPHA (-a or --alpha) - Initial value for the alpha variable (weight given to the new value during Q-learning)
-    # Value is introduced by the user (must be between 0 and 1).
-
-    parser.add_argument('-a',
-                        '--alpha',
-                        type=float,
-                        help="(LEARNING ONLY) Sets a value for the alpha variable (weight given to the new value "
-                             "during Q-learning). Must be between 0 and 1. DEFAULT = " + str(alpha))
-
     # GAMMA (-g or --gamma) - Initial value for the gamma variable (discount factor,
     # importance given to future rewards in Q-learning)
     # Value is introduced by the user.
@@ -1186,11 +1733,6 @@ if __name__ == "__main__":
         if batch_size < 1 or batch_size > 2000:
             raise ValueError("Batch size must be between 1 and 2000")
 
-    if arguments['alpha'] is not None:
-        alpha = arguments['alpha']
-        if alpha < 0.0 or alpha > 1.0:
-            raise ValueError("Alpha must be between 0.0 and 1.0")
-
     if arguments['gamma'] is not None:
         gamma = arguments['gamma']
 
@@ -1229,7 +1771,7 @@ if __name__ == "__main__":
 
     # Check if there is an AI player
     if ai_player:
-        
+
         # Ensure first a proper value of epsilon: epsilon should be 0 is the AI is a player
         # (we want to strictly follow the policy)
         if not ai_learning:
@@ -1240,7 +1782,6 @@ if __name__ == "__main__":
         # if elses will be used instead
         if agent_type == 'standard':
             agent = dql_agent.DQLAgent(learning_rate,
-                                       alpha,
                                        gamma,
                                        epsilon,
                                        batch_size,
