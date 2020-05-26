@@ -27,13 +27,15 @@ class DQLAgent:
     - Epsilon-greedy policy for selecting the action (exploration-exploitation)
     """
 
-    def __init__(self, learning_rate, gamma, epsilon, batch_size, seed):
+    def __init__(self, learning_rate, gamma, epsilon, epsilon_decay, minimum_epsilon, batch_size, seed):
         """
         Constructor of the class. Creates an agent from the specified information
 
         :param learning_rate: Learning rate for the model
         :param gamma: Initial gamma value (discount factor, importance given to future rewards)
         :param epsilon: Initial epsilon value (chance for a random action in exploration-exploitation)
+        :param epsilon_decay: Decay value for epsilon (how much epsilon decreases every epoch)
+        :param minimum_epsilon: Minimum value for epsilon
         :param batch_size: How many actions will be sampled at once
         :param seed: Seed to be used for all random choices. Optional.
         """
@@ -46,8 +48,19 @@ class DQLAgent:
             3: 'hard_drop'
         }
 
+        # Create an inverse dictionary, to be able to look up numeric values by name
+        self.inverse_actions = {
+            'right': 0,
+            'left': 1,
+            'rotate': 2,
+            'hard_drop': 3
+        }
+
+        # Store variables related to DQL
         self.gamma = gamma
         self.epsilon = epsilon
+        self.epsilon_decay = epsilon_decay
+        self.minimum_epsilon = minimum_epsilon
 
         # Creates the experience replay container
         # A deque is used to have a queue (oldest experiences in the experience replay go out first)
@@ -71,6 +84,18 @@ class DQLAgent:
 
         # Set the batch size
         self.batch_size = batch_size
+
+        # Internal variables #
+
+        # Count the actual epoch
+        self.current_epoch = 1
+
+        # Keep a track of the count of actions performed this epoch
+        self.actions_performed = 0
+
+
+
+    # Internal methods
 
     def _construct_neural_network(self, learning_rate):
         """
@@ -133,7 +158,7 @@ class DQLAgent:
 
         The network is trained after every action
         """
-
+        # TODO TRABAJA EN BATCH
         # Take a batch from the experience replay
         if len(self.experience_replay) < self.batch_size:
             size = len(self.experience_replay)
@@ -162,7 +187,8 @@ class DQLAgent:
             # Train the network (verbose 0 to ensure that no messages are shown)
             self.q_network.fit(state, train, epochs=1, verbose=0)
 
-    def _add_extra_dimension(self, state):
+    @staticmethod
+    def _add_extra_dimension(state):
         """
         Adds an extra dimension to a state, transforming it into Keras format
 
@@ -172,12 +198,17 @@ class DQLAgent:
 
         return np.expand_dims(state, axis=0)
 
+    # Public methods
+
     def act(self, state):
         """
         For the current state, return the optimal action to take or a random action randomly
         :param state: The current state provided by the game
         :return: The action taken (as a string) and, if applicable, the set of chances for each action
         """
+
+        # Count the action
+        self.actions_performed += 1
 
         # Generate a random number
         random_chance = np.random.rand()
@@ -188,7 +219,8 @@ class DQLAgent:
         # Check if the value is smaller (random action) or greater (optimal action) than epsilon
         if random_chance < self.epsilon:
             # Take a random action from the actions dictionary
-            return np.random.choice(self.actions.values()), None
+            # The strings are directly sampled in this case
+            return np.random.choice(list(self.actions.values())), None
         else:
             # Take the optimal action
             q_values = self.q_network.predict(state)
@@ -198,6 +230,8 @@ class DQLAgent:
         """
         Creates an experience and stores it into the experience replay of the agent
 
+        If enough experiences have been inserted, train the Q Network
+
         :param state: Initial state
         :param action: Action taken in the initial state
         :param reward: Reward of taking the action in the initial state
@@ -205,18 +239,39 @@ class DQLAgent:
         :param terminated: Whether the initial state is a final state or not
         """
 
+        # Prepare the states with Keras format
+        state = self._add_extra_dimension(state)
+        next_state = self._add_extra_dimension(next_state)
+
+        # Convert the action back into its numeric position
+        action = self.inverse_actions[action]
+
         # Store everything as a tuple
         self.experience_replay.append((state, action, reward, next_state, terminated))
 
-        # Train the network
-        self._learn_from_replay()
-
-    def finish_epoch(self):
+    def finish_epoch(self, lines, score):
         """
         Finishes the current epoch, updating all necessary values
         """
 
+        # Train the network
+        self._learn_from_replay()
+
         # Update the policy network to the current Q network weights
         self._update_target_network()
+
+        # Update the epsilon with the epsilon decay (and check that it doesn't go below the minimum)
+        self.epsilon = self.epsilon * self.epsilon_decay
+        if self.epsilon < self.minimum_epsilon:
+            self.epsilon = self.minimum_epsilon
+
+        # Print the relevant info on the screen
+        print("EPOCH " + str(self.current_epoch) + " FINISHED (Lines: " + str(lines) + "/Score: " + str(score) + ")")
+
+        # Store the info for the current epoch
+        # TODO
+
+        # Update the epoch
+        self.current_epoch += 1
 
 

@@ -177,20 +177,29 @@ shapes = [S, Z, I, O, J, L, T]
 initial_speed = 500
 
 # Speed modifier (how much the initial speed decreases each level increment, in milliseconds)
-speed_modifier = 40
+speed_modifier = 25
 
 # Minimum speed (the maximum speed at which the game goes, in milliseconds)
 # Typically, speed increases up to 9 times
 minimum_speed = initial_speed - speed_modifier * 9
 
-# LEARNING RELATED VARIABLES #
+# LEARNING AND AI RELATED VARIABLES #
 
 # Instantiated agent
 # (Stored as a global variable, so it survives through loops and can always be accessed)
 agent = None
 
 # Polling speed (how often the agent acts, in milliseconds)
-polling_speed = 100
+# Currently, the agent acts four times per second
+# Initial speed will be adjusted to the same as the polling speed when an AI is active (simplification)
+polling_speed = 250
+
+# Initial speed when using an AI. This speed will NOT be modified with lines cleared. This is done to simplify the game
+# and ensure that the agent movement and piece drops are always synchronized
+game_speed_ai = polling_speed
+
+# Maximum number of lines (if an agent reaches this amount of lines in a game, the game is cut)
+max_lines_training = 100
 
 ####################
 # PLAYER VARIABLES #
@@ -227,7 +236,7 @@ fast_training = False
 
 # Batch size used to sample from the Experience Replay. Default value is specified below
 # Set using --batchsize
-batch_size = 100
+batch_size = 512
 
 # Gamma value used by DQL (learning rate of DQL). Default value is specified below
 # Set using --gamma
@@ -236,11 +245,25 @@ gamma = 0.6
 # Epsilon value used by DQL (chance to perform a random action in exploration-exploitation)
 # Default value is specified below
 # Set using --epsilon
-epsilon = 0.2
+epsilon = 0.85
+
+# Epsilon decay used by DQL (how much does epsilon decay every epoch, multiplicatively)
+# Default value is specified below
+# Set using --epsilondecay
+epsilon_decay = 0.995
+
+# Minimum epsilon value used by DQL (epsilon cannot go below this value)
+# Default value is specified below
+# Set using --minimumepsilon
+min_epsilon = 0.1
 
 # Learning rate used by the neural network. Default value is specified below
 # Set using --learningrate
 learning_rate = 0.01
+
+# Number of epochs used to train the agent. Default value is specified below.
+# Set using --epochs
+total_epochs = 1000
 
 
 #####################
@@ -793,7 +816,7 @@ def clear_rows(grid, locked):
 
 # GRAPHICS #
 
-def draw_ai_information(surface, current_state, q_values):
+def draw_ai_player_information(surface, current_state, q_values):
     """
     Draws relevant information for the AI player (in order to visualize the choices being taken)
 
@@ -954,6 +977,41 @@ def generate_state(locked_positions, current_piece):
     return np.array(grid)
 
 
+def compute_reward(game_finished, piece_locked, lines_cleared, lowest_position_filled):
+    """
+    Computes the reward for a pair of state, action taking into account some details
+
+    The reward computed is as follows:
+    * If the game is finished, REWARD = -10 (we don't want the agent to lose)
+    * If no piece has been locked, REWARD = -0.1 (we want an incentive for the agent to lock pieces)
+    * If a piece has been locked:
+        * No line cleared, REWARD = lowest_position_filled / 10 (locking pieces is good, the deeper the better)
+        * Lines cleared, REWARD = +2^(lines_cleared + 1) (the more lines that are cleared at once, the better the state is)
+
+    :param game_finished: TRUE if the action caused the end of the game, FALSE otherwise
+    :param piece_locked: TRUE if the piece has been locked, FALSE otherwise
+    :param lines_cleared: (Only if piece_locked = TRUE) How many lines were cleared with the locked piece.
+    :param lowest_position_filled: (Only if piece_locked = TRUE) The lowest Y value reached by the locked piece.
+    :return: The reward for the pair state, action
+    """
+
+    # TODO: AJUSTA REWARD (HACIENDO UNA OPCION ALTERNATIVA) QUE VALORE MEJOR O PEOR EL COLOCAR LA FICHA DEPENDIENDO DE ALGUNOS ATRIBUTOS
+
+    # Game finished: immediate big penalty
+    if game_finished:
+        return -10
+    # Game not finished but piece not locked: very small penalty (want the agent to try to lock fast)
+    elif not piece_locked:
+        return -0.1
+    else:
+        # 0 lines locked: reward the agent according to how deep the piece is (lower = better)
+        if lines_cleared == 0:
+            return lowest_position_filled / 10
+        # 1 or more lines locked: give the agent a bigger reward (more lines = better reward)
+        else:
+            return 2 ** (lines_cleared + 1)
+
+
 ###############################
 # MAIN LOOP AUXILIARY METHODS #
 ###############################
@@ -969,7 +1027,7 @@ def initialize_game():
     This has been taken into a separate method since it is shared by all three loops
 
     :returns tuple(locked_positions, current_speed, score, lines, level, change_piece, run, randomizer_shapes,
-            current_piece, next_piece, clock, fall_time, level_time)
+            current_piece, next_piece, clock, fall_time)
             (meaning of each value explained in the code)
     """
 
@@ -1002,14 +1060,13 @@ def initialize_game():
     # (The human player uses a real-time clock)
     clock = pygame.time.Clock()
     fall_time = 0
-    level_time = 0
 
     # Start playing the song (if sound is active)
     play_song()
 
     # Return all initialized variables
     return (locked_positions, current_speed, score, lines, level, change_piece, run, randomizer_shapes,
-            current_piece, next_piece, clock, fall_time, level_time)
+            current_piece, next_piece, clock, fall_time)
 
 
 def process_inputs(inputs, current_piece, grid):
@@ -1107,7 +1164,7 @@ def main_human_player(win):
 
     # Initialize all necessary variables
     (locked_positions, current_speed, score, lines, level, change_piece, run, randomizer_shapes, current_piece,
-     next_piece, clock, fall_time, level_time) = initialize_game()
+     next_piece, clock, fall_time) = initialize_game()
 
     # While the game is not over (main logic loop)
     while run:
@@ -1115,7 +1172,6 @@ def main_human_player(win):
         # Create the grid and update all the clocks, marking a new tick
         grid = create_grid(locked_positions)
         fall_time += clock.get_rawtime()
-        level_time += clock.get_rawtime()
         clock.tick()
 
         # Create a list to contain all processed inputs
@@ -1251,15 +1307,17 @@ def main_ai_player(win):
     """
 
     # Initialize all necessary variables
-    (locked_positions, current_speed, score, lines, level, change_piece, run, randomizer_shapes, current_piece,
-     next_piece, clock, fall_time, level_time) = initialize_game()
+    (locked_positions, _, score, lines, level, change_piece, run, randomizer_shapes, current_piece,
+     next_piece, clock, fall_time) = initialize_game()
+
+    # Current speed will be fixed to the specified value (and not updated)
+    current_speed = game_speed_ai
 
     # AI: Poll time is used to check for the AI player actions
     poll_time = 0
 
     # AI: Keep Action and Q-Values outside of the loop (to keep their values)
     # They are initialized with placeholder values
-    action = None
     q_values = np.array([[0, 0, 0, 0]])
 
     # While the game is not over (main logic loop)
@@ -1268,7 +1326,6 @@ def main_ai_player(win):
         # Create the grid and update all the clocks, marking a new tick
         grid = create_grid(locked_positions)
         fall_time += clock.get_rawtime()
-        level_time += clock.get_rawtime()
         poll_time += clock.get_rawtime()
         clock.tick()
 
@@ -1327,15 +1384,10 @@ def main_ai_player(win):
             current_piece = next_piece
             next_piece, randomizer_shapes = get_shape(randomizer_shapes)
 
-            # Update lines, level and speed
+            # Update lines and level (speed is not updated)
             lines_cleared = clear_rows(grid, locked_positions)
             lines += len(lines_cleared)
             level = lines // 10
-
-            current_speed = initial_speed - speed_modifier * level
-            # Ensure that the speed doesn't go below a limit
-            if current_speed < minimum_speed:
-                current_speed = 0.05
 
             # Play the piece lock sound
             play_sound("fall")
@@ -1352,6 +1404,7 @@ def main_ai_player(win):
 
                 # Draw the screen first (to ensure the piece is displayed on its proper place) and then draw the effect
                 draw_manager(win, grid, current_piece, next_piece, score, level, lines - len(lines_cleared))
+                draw_ai_player_information(win, current_state, q_values)
                 draw_clear_row(win, lines_cleared)
 
                 # Compute the score to add
@@ -1370,7 +1423,7 @@ def main_ai_player(win):
 
         # Draw everything (original HUD and AI HUD)
         draw_manager(win, grid, current_piece, next_piece, score, level, lines)
-        draw_ai_information(win, current_state, q_values)
+        draw_ai_player_information(win, current_state, q_values)
         # Update the screen
         pygame.display.flip()
 
@@ -1381,6 +1434,199 @@ def main_ai_player(win):
             draw_game_over_effect(win)
             run = False
 
+
+def main_ai_learn(win):
+    """
+    Main logic of the game when the AI is in learning mode
+
+    This method has several differences compared to the standard AI player loop:
+    - The game automatically replays itself after every epoch
+    - The game can run either on a real clock or a logical clock (when running in fast mode)
+
+    :param win: Surface used to draw all the elements.
+    """
+
+    # Initialize the epoch counter
+    current_epoch = 1
+
+    # Game is played until the max epoch is reached
+    while current_epoch <= total_epochs:
+
+        # GAME START:
+
+        # Initialize all necessary variables
+        (locked_positions, _, score, lines, level, change_piece, run, randomizer_shapes, current_piece,
+         next_piece, clock, fall_time) = initialize_game()
+
+        # Piece fall speed will not change during the game, so it will not be modified
+        current_speed = game_speed_ai
+
+        # If the game is in fast mode, the clock itself will actually be ignored
+        # AI: Poll time is used to check for the AI player actions
+        poll_time = 0
+
+        # AI: Keep the Q-Values outside of the loop (to keep their values through iterations of the loop)
+        # They are initialized with placeholder values
+        q_values = np.array([[0, 0, 0, 0]])
+
+        # While the game is not over (main logic loop)
+        while run:
+
+            # Create the grid
+            grid = create_grid(locked_positions)
+
+            # Check if fast mode is active
+            # NOT ACTIVE: The real-time clock is used
+            if not fast_training:
+                fall_time += clock.get_rawtime()
+                poll_time += clock.get_rawtime()
+                clock.tick()
+            # ACTIVE: automatically increase the counters by the polling speed
+            else:
+                fall_time += polling_speed
+                poll_time += polling_speed
+
+            # Check if the player has exited the game
+            # Train mode cannot be exited using ESC (needs to be canceled through the console or closing the window)
+            for event in pygame.event.get():
+
+                # Window has been closed
+                if event.type == pygame.QUIT:
+                    pygame.display.quit()
+                    pygame.quit()
+                    sys.exit()
+
+            # Prepare the current state for the AI
+            current_state = generate_state(locked_positions, current_piece)
+
+            # Clock calculations
+            # The order of these calculations is relevant. The movement must be polled first always
+            # This ensures it remains consistent with the human behaviour (movement first, locking second)
+
+            # Store the action performed (used to store the experience)
+            action = None
+
+            # 1 - If needed, poll the agent for an action and execute it
+            if poll_time > polling_speed:
+                poll_time = 0
+                # Get the action and the q-values
+                action, q_values = agent.act(current_state)
+                # Act
+                process_inputs([action], current_piece, grid)
+
+            # 2 - If needed, move the piece downwards
+            if fall_time > current_speed:
+                fall_time = 0
+                current_piece.y += 1
+                if not valid_space(current_piece, grid) and current_piece.y > 0:
+                    current_piece.y -= 1
+                    change_piece = True
+
+            # Place the current piece into the grid
+            grid, shape_pos = place_piece(current_piece, grid)
+
+            # Variables used later to store the experience #
+
+            # Remember if the piece has been locked or not (since the value is changed after processing the piece lock)
+            # This is needed to store the experience
+            final_state = change_piece
+
+            # Store the lowest Y value (used to compute the reward)
+            lowest_y = -1
+
+            # Store the number of lines cleared
+            lines_cleared_store = 0
+
+            ###
+
+            # If the piece has been locked in place
+            if change_piece:
+                # Add the current piece to locked positions (conserving the biggest y value)
+                shape_y = -1
+                for pos in shape_pos:
+                    if pos[1] > shape_y:
+                        shape_y = pos[1]
+                    p = (pos[0], pos[1])
+                    locked_positions[p] = current_piece.color
+
+                # Update the lowest Y outside
+                lowest_y = shape_y
+
+                # Get the next piece
+                current_piece = next_piece
+                next_piece, randomizer_shapes = get_shape(randomizer_shapes)
+
+                # Update lines and level (speed will not be updated)
+                lines_cleared = clear_rows(grid, locked_positions)
+                lines += len(lines_cleared)
+                level = lines // 10
+
+                # Update the lines cleared outside
+                lines_cleared_store = len(lines_cleared)
+
+                # Play the piece lock sound
+                play_sound("fall")
+
+                # Update score
+                if len(lines_cleared) == 0:
+                    # No lines cleared
+                    score += shape_y + 1
+                else:
+                    # One or more lines cleared
+
+                    # Play the appropriate sound. Sound is played before the effect is drawn to ensure it's not delayed
+                    play_sound("line")
+
+                    # Draw the screen first (to ensure the piece is displayed on its proper place) and then draw the effect
+                    if not fast_training:
+                        draw_manager(win, grid, current_piece, next_piece, score, level, lines - len(lines_cleared))
+                        draw_clear_row(win, lines_cleared)
+
+                    # Compute the score to add
+                    multiplier = 0
+                    buffer = len(lines_cleared)
+                    # This increases exponentially the multiplier depending on lines
+                    # 1 line = x1, 2 lines = x3, 3 lines = x6, 4 lines = x10
+                    while buffer > 0:
+                        multiplier += buffer
+                        buffer -= 1
+                    score += (level + 1) * multiplier * 100
+
+                # Prepare everything for the next loop
+                change_piece = False
+
+                # Only tick if not in fast mode
+                if not fast_training:
+                    clock.tick()
+
+            # Check if the game has ended
+            if check_defeat(locked_positions):
+                run = False
+
+            # If an action has been taken, prepare everything to store the experience
+            if action is not None:
+                # State reached after the action
+                new_state = generate_state(locked_positions, current_piece)
+                # Reward for the state/action pair
+                reward = compute_reward(not run, final_state, lines_cleared_store, lowest_y)
+
+                # Store the experience into the agent
+                agent.insert_experience(current_state, action, reward, new_state, final_state)
+
+            # Draw everything (original HUD and AI HUD) IF not in fast mode
+            if not fast_training:
+                draw_manager(win, grid, current_piece, next_piece, score, level, lines)
+                #draw_ai_player_information(win, current_state, q_values)
+                # Update the screen
+                pygame.display.flip()
+
+        # GAME END
+
+        # Advance to the next epoch
+        current_epoch += 1
+
+        # Notify the agent of the new epoch
+        agent.finish_epoch(lines, score)
 
 def OLD(win):
 
@@ -1413,7 +1659,6 @@ def OLD(win):
     # (AI player uses a real-time clock)
     clock = pygame.time.Clock()
     fall_time = 0
-    level_time = 0
     # Poll time is used to check for the AI player actions
     poll_time = 0
 
@@ -1426,7 +1671,6 @@ def OLD(win):
         # Create the grid and update all the clocks, marking a new tick
         grid = create_grid(locked_positions)
         fall_time += clock.get_rawtime()
-        level_time += clock.get_rawtime()
         clock.tick()
 
         # Process all the player inputs
@@ -1627,6 +1871,14 @@ if __name__ == "__main__":
                         action='store_true',
                         help="Disables sound for the game")
 
+    # FIXED SPEED (-fs or --fixedspeed) - (HUMAN ONLY) Sets the speed to a fixed speed (speed will not increase with
+    # difficulty). This setting emulates the simplified speed setting used for AI players
+    parser.add_argument('-fs',
+                        '--fixedspeed',
+                        action='store_true',
+                        help="(HUMAN ONLY) Fixes the game speed so that it does not increase with lines cleared. "
+                             "Emulates the behaviour used for AI.")
+
     # AI (-ai or --ai) - The game will be played by an artificial intelligence
     # Possible values:
     # - 'play' - The AI will use pre-defined weights to play the game
@@ -1668,7 +1920,7 @@ if __name__ == "__main__":
 
     # BATCH SIZE (-b or --batch) - Only for training. Specifies how many experiences are taken from the
     # experience replay to train at once.
-    # Value is introduced by the user (must be between 1 and 2000). Default value if not specified is 100
+    # Value is introduced by the user (must be between 1 and 2000).
 
     parser.add_argument('-b',
                         '--batchsize',
@@ -1686,25 +1938,54 @@ if __name__ == "__main__":
                         help="(LEARNING ONLY) Sets a value for the gamma variable (discount factor, importance given "
                              "to future rewards in Q-learning). DEFAULT = " + str(gamma))
 
-    # EPSILON (-e or --epsilon) - Initial variable for the epsilon variable (initial chance for a random action during
+    # EPSILON (-eps or --epsilon) - Initial variable for the epsilon variable (initial chance for a random action during
     # learning with Deep Q-Learning (part of the exploration-exploitation principle)
-    # Value is introduced by the user (must be between 0 and 1). Default value if not specified is 0.8
+    # Value is introduced by the user (must be between 0 and 1).
 
-    parser.add_argument('-e',
+    parser.add_argument('-eps',
                         '--epsilon',
                         type=float,
                         help="(LEARNING ONLY) Sets a value for the epsilon variable (initial chance to take a random "
                              "action during learning, part of exploration-exploitation). Must be between 0 and 1. "
                              "DEFAULT = " + str(epsilon))
 
+    # EPSILON DECAY (-ed or --epsilondecay) - Decay used for epsilon. Epsilon is reduced multiplicatively after
+    # every epoch, by multiplying it by this value. Value is introduced by the user (must be between 0 and 1).
+
+    parser.add_argument('-ed',
+                        '--epsilondecay',
+                        type=float,
+                        help="(LEARNING ONLY) Sets the value for the epsilon decay (how much does the epsilon value"
+                             " decrease after every epoch, obtained by multiplying epsilon by this value). "
+                             "Must be between 0 and 1. "
+                             "DEFAULT = " + str(epsilon_decay))
+
+    # MINIMUM EPSILON (-me or --minimumepsilon) - Minimum value for epsilon (epsilon cannot be reduced below this value
+    # by the decay). Value is introduced by the user (must be between 0 and 1)
+
+    parser.add_argument('-me',
+                        '--minimumepsilon',
+                        type=float,
+                        help="(LEARNING ONLY) Sets the minimum value for epsilon (epsilon cannot decay below this "
+                             "value). Must be between 0 and 1. "
+                             "DEFAULT = " + str(min_epsilon))
+
     # LEARNING RATE (-lr or --learningrate) - Initial for the learning rate of the optimizer (how much new experiences
     # are valued in the neural network)
-    # Value is introduced by the user. Default value if not specified is 0.01
+    # Value is introduced by the user.
     parser.add_argument('-lr',
                         '--learningrate',
                         type=float,
                         help="(LEARNING ONLY) Sets a value for the learning rate (value given to new samples in the "
                              "neural network). DEFAULT = " + str(learning_rate))
+
+    # TOTAL EPOCHS (-epo or --epochs) - Total number of epochs to train the agent (the agent will be trained
+    # this amount of epochs). Value is introduced by the user (must be positive)
+    parser.add_argument('-epo',
+                        '--epochs',
+                        type=int,
+                        help="(LEARNING ONLY) Sets the total amount of epochs to train the agent. Must be positive. "
+                             "DEFAULT = " + str(total_epochs))
 
     # Parse the arguments
     arguments = vars(parser.parse_args())
@@ -1712,10 +1993,18 @@ if __name__ == "__main__":
     if arguments['silent']:
         sound_active = False
 
+    # There is no need to store fixed speed: the speed can be changed directly
+    if arguments['fixedspeed']:
+        initial_speed = game_speed_ai
+        speed_modifier = 0
+
     if arguments['ai'] is not None:
         ai_player = True
         if arguments['ai'] == 'learn':
             ai_learning = True
+
+            # Train mode is always silent, turn off the sound
+            sound_active = False
 
     if arguments['seed'] is not None:
         seed = arguments['seed']
@@ -1741,8 +2030,23 @@ if __name__ == "__main__":
         if epsilon < 0.0 or epsilon > 1.0:
             raise ValueError("Epsilon must be between 0.0 and 1.0")
 
+    if arguments['epsilondecay'] is not None:
+        epsilon_decay = arguments['epsilondecay']
+        if epsilon_decay < 0.0 or epsilon_decay > 1.0:
+            raise ValueError("Epsilon decay must be between 0.0 and 1.0")
+
+    if arguments['minimumepsilon'] is not None:
+        min_epsilon = arguments['minimumepsilon']
+        if min_epsilon < 0.0 or min_epsilon > 1.0:
+            raise ValueError("Minimum epsilon must be between 0.0 and 1.0")
+
     if arguments['learningrate'] is not None:
         learning_rate = arguments['learningrate']
+
+    if arguments['epochs'] is not None:
+        total_epochs = arguments['epochs']
+        if total_epochs <= 0:
+            raise ValueError("Total number of epochs must be positive")
 
     # Initialize pygame
     pygame.font.init()
@@ -1751,8 +2055,10 @@ if __name__ == "__main__":
     pygame.mixer.init()
 
     # Prepare the game window
-    # (the window will be wider if an AI player is active)
-    if ai_player:
+    # (the window will be wider if an AI player is active, but only if fast mode is not active)
+    if ai_learning and fast_training:
+        win = None
+    elif ai_player:
         win = pygame.display.set_mode((screen_width + screen_width_extra, screen_height))
     else:
         win = pygame.display.set_mode((screen_width, screen_height))
@@ -1772,10 +2078,12 @@ if __name__ == "__main__":
     # Check if there is an AI player
     if ai_player:
 
-        # Ensure first a proper value of epsilon: epsilon should be 0 is the AI is a player
+        # Ensure first a proper value of epsilon: all epsilon values should be 0 ONLY if the AI is a player
         # (we want to strictly follow the policy)
         if not ai_learning:
             epsilon = 0
+            epsilon_decay = 0
+            min_epsilon = 0
 
         # AI player present: instantiate the appropriate agent
         # A switch case statement would be used here, but since Python does not implement it,
@@ -1784,13 +2092,15 @@ if __name__ == "__main__":
             agent = dql_agent.DQLAgent(learning_rate,
                                        gamma,
                                        epsilon,
+                                       epsilon_decay,
+                                       min_epsilon,
                                        batch_size,
                                        seed)
 
     # If the game is in learning mode, directly launch the game (without the main menu)
     if ai_learning:
-        # TODO AQUI FALTA
-        pass
+        # Start the main train loop
+        main_ai_learn(win)
     # Otherwise, launch the main menu
     else:
         menu_logic(win)
