@@ -201,6 +201,9 @@ game_speed_ai = polling_speed
 # Maximum number of lines (if an agent reaches this amount of lines in a game, the game is cut)
 max_lines_training = 100
 
+# Epsilon percentage. Once this percentage of epochs has been completed, epsilon should be 0
+epsilon_percentage = 80
+
 ####################
 # PLAYER VARIABLES #
 ####################
@@ -246,16 +249,6 @@ gamma = 0.6
 # Default value is specified below
 # Set using --epsilon
 epsilon = 0.85
-
-# Epsilon decay used by DQL (how much does epsilon decay every epoch, multiplicatively)
-# Default value is specified below
-# Set using --epsilondecay
-epsilon_decay = 0.995
-
-# Minimum epsilon value used by DQL (epsilon cannot go below this value)
-# Default value is specified below
-# Set using --minimumepsilon
-min_epsilon = 0.1
 
 # Learning rate used by the neural network. Default value is specified below
 # Set using --learningrate
@@ -1949,27 +1942,6 @@ if __name__ == "__main__":
                              "action during learning, part of exploration-exploitation). Must be between 0 and 1. "
                              "DEFAULT = " + str(epsilon))
 
-    # EPSILON DECAY (-ed or --epsilondecay) - Decay used for epsilon. Epsilon is reduced multiplicatively after
-    # every epoch, by multiplying it by this value. Value is introduced by the user (must be between 0 and 1).
-
-    parser.add_argument('-ed',
-                        '--epsilondecay',
-                        type=float,
-                        help="(LEARNING ONLY) Sets the value for the epsilon decay (how much does the epsilon value"
-                             " decrease after every epoch, obtained by multiplying epsilon by this value). "
-                             "Must be between 0 and 1. "
-                             "DEFAULT = " + str(epsilon_decay))
-
-    # MINIMUM EPSILON (-me or --minimumepsilon) - Minimum value for epsilon (epsilon cannot be reduced below this value
-    # by the decay). Value is introduced by the user (must be between 0 and 1)
-
-    parser.add_argument('-me',
-                        '--minimumepsilon',
-                        type=float,
-                        help="(LEARNING ONLY) Sets the minimum value for epsilon (epsilon cannot decay below this "
-                             "value). Must be between 0 and 1. "
-                             "DEFAULT = " + str(min_epsilon))
-
     # LEARNING RATE (-lr or --learningrate) - Initial for the learning rate of the optimizer (how much new experiences
     # are valued in the neural network)
     # Value is introduced by the user.
@@ -2030,16 +2002,6 @@ if __name__ == "__main__":
         if epsilon < 0.0 or epsilon > 1.0:
             raise ValueError("Epsilon must be between 0.0 and 1.0")
 
-    if arguments['epsilondecay'] is not None:
-        epsilon_decay = arguments['epsilondecay']
-        if epsilon_decay < 0.0 or epsilon_decay > 1.0:
-            raise ValueError("Epsilon decay must be between 0.0 and 1.0")
-
-    if arguments['minimumepsilon'] is not None:
-        min_epsilon = arguments['minimumepsilon']
-        if min_epsilon < 0.0 or min_epsilon > 1.0:
-            raise ValueError("Minimum epsilon must be between 0.0 and 1.0")
-
     if arguments['learningrate'] is not None:
         learning_rate = arguments['learningrate']
 
@@ -2078,22 +2040,23 @@ if __name__ == "__main__":
     # Check if there is an AI player
     if ai_player:
 
+        # Compute what the epsilon decay would actually be
+        # The key idea is that epsilon reaches 0 once the specified % of epochs is reached
+        epochs_to_reduce = (total_epochs * epsilon_percentage) / 100
+        epsilon_decay = epsilon / epochs_to_reduce
+
         # Ensure first a proper value of epsilon: all epsilon values should be 0 ONLY if the AI is a player
         # (we want to strictly follow the policy)
         if not ai_learning:
             epsilon = 0
             epsilon_decay = 0
-            min_epsilon = 0
 
-        # AI player present: instantiate the appropriate agent
-        # A switch case statement would be used here, but since Python does not implement it,
-        # if elses will be used instead
+        # AI player exists: instantiate the appropriate agent
         if agent_type == 'standard':
             agent = dql_agent.DQLAgent(learning_rate,
                                        gamma,
                                        epsilon,
                                        epsilon_decay,
-                                       min_epsilon,
                                        batch_size,
                                        seed)
 

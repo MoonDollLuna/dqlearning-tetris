@@ -27,15 +27,14 @@ class DQLAgent:
     - Epsilon-greedy policy for selecting the action (exploration-exploitation)
     """
 
-    def __init__(self, learning_rate, gamma, epsilon, epsilon_decay, minimum_epsilon, batch_size, seed):
+    def __init__(self, learning_rate, gamma, epsilon, epsilon_decay, batch_size, seed):
         """
         Constructor of the class. Creates an agent from the specified information
 
         :param learning_rate: Learning rate for the model
         :param gamma: Initial gamma value (discount factor, importance given to future rewards)
         :param epsilon: Initial epsilon value (chance for a random action in exploration-exploitation)
-        :param epsilon_decay: Decay value for epsilon (how much epsilon decreases every epoch)
-        :param minimum_epsilon: Minimum value for epsilon
+        :param epsilon_decay: Decay value for epsilon (how much epsilon decreases every epoch, linearly)
         :param batch_size: How many actions will be sampled at once
         :param seed: Seed to be used for all random choices. Optional.
         """
@@ -260,10 +259,10 @@ class DQLAgent:
         # Update the policy network to the current Q network weights
         self._update_target_network()
 
-        # Update the epsilon with the epsilon decay (and check that it doesn't go below the minimum)
-        self.epsilon = self.epsilon * self.epsilon_decay
-        if self.epsilon < self.minimum_epsilon:
-            self.epsilon = self.minimum_epsilon
+        # Update the epsilon with the epsilon decay (and check that it doesn't go below 0)
+        self.epsilon = self.epsilon - self.epsilon_decay * self.current_epoch
+        if self.epsilon < 0.0:
+            self.epsilon = 0.0
 
         # Print the relevant info on the screen
         print("EPOCH " + str(self.current_epoch) + " FINISHED (Lines: " + str(lines) + "/Score: " + str(score) + ")")
@@ -273,5 +272,4 @@ class DQLAgent:
 
         # Update the epoch
         self.current_epoch += 1
-
 
