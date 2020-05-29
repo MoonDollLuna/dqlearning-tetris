@@ -2,7 +2,43 @@
 # Originally based on the following tutorial:
 # https://techwithtim.net/tutorials/game-development-with-python/tetris-pygame/tutorial-1/
 
-# The game consists of a 10 x 20 grid (standard tetris size)
+# This file contains the full implementation of the Tetris game, as well as several methods used to assist the agents.
+# The structure of the file is the following (in order)
+#       1 - Imports
+#       2 - Global variables
+#           2A - Graphical variables
+#           2B - Sound variables
+#           2C - Gameplay variables
+#           2D - AI-related variables
+#       3 - Player variables
+#       4 - Class definitions
+#       5 - Graphical methods
+#       6 - Sound methods
+#       7 - Gameplay methods
+#       8 - Agent and AI-related methods
+#           8A - Graphical methods
+#           8B - Gameplay methods
+#       9 - Main loop auxiliary methods (mostly methods shared by all loops)
+#       10 - Main loop methods
+#           10A - Player main loop
+#           10B - AI Player main loop
+#           10C - AI Learner main loop
+#           10D - Main menu logic
+#       11 - Main method
+#           11A - Argument definition
+#           11B - Argument parsing
+#           11C - Main logic
+
+# The game was developed using PyGame.
+# The code is fully documented, explaining inputs and outputs, and the use of every method.
+
+# The game consists of a standard Tetris game, with a 10 x 20 grid (standard tetris size)
+# The game also contains some specific choices, to aid with learning:
+#       * Bag randomizer (a bag of all seven tetraminos is created, and random pieces are pulled from the bag. Once
+#         the bag is empty, a new bag is generated). This ensures fairness in the random generation
+#       * Instant lock once a piece stops on top of another piece (cannot move it to the sides or rotate)
+#       * No capability to hold a piece (simpler to learn)
+#       * (ONLY WHEN USING AI) Game speed is fixed (equal to agent polling speed). Eases the relation between action -> new state
 
 ###########
 # IMPORTS #
@@ -252,11 +288,11 @@ experience_replay_size = 5000
 # Set using --batchsize
 batch_size = 512
 
-# Heuristic used to compute the rewards. There are two possible values:
-# * 'game' for a heuristic based directly on the game score
-# * 'heuristic' for a heuristic based on scoring the state according to a heuristic function
-# Set using --heuristic
-heuristic = 'heuristic'
+# Method used to compute the rewards. There are two possible values:
+# * 'game' for a method based directly on the game score
+# * 'heuristic' for a method based on scoring the state according to a heuristic function
+# Set using --rewards
+rewards_method = 'game'
 
 # Gamma value used by DQL (learning rate of DQL). Default value is specified below
 # Set using --gamma
@@ -1314,10 +1350,11 @@ def compute_reward(game_finished, action, piece_locked, lines_cleared, lowest_po
     """
     Computes the reward for a pair of state, action taking into account some details
 
-    There are currently two possible approaches to the heuristic:
+    There are currently two possible approaches to the rewards method:
     * 'game': Game score based approach. Gives scores to the action depending on how has the action affected the score
     * 'heuristic': Heuristic based approach. Scores both the original state and the state after applying the action
-                   using a heuristic. The reward is (new state heuristic) - (previous state heuristic).
+                   using a heuristic function.
+                   The reward is (new state heuristic) - (previous state heuristic).
 
     :param game_finished: TRUE if the action caused the end of the game, FALSE otherwise
     :param action: Action taken to reach this state
@@ -1333,9 +1370,9 @@ def compute_reward(game_finished, action, piece_locked, lines_cleared, lowest_po
              score: The score awarded to the current state (heuristic approach) or None (game approach)
     """
 
-    # Reward computed depends on the heuristic:
+    # Reward computed depends on the method:
 
-    if heuristic == 'game':
+    if rewards_method == 'game':
         """
         Game reward
         
@@ -2222,17 +2259,18 @@ if __name__ == "__main__":
                              "once while learning. Cannot be bigger than the experience replay size. "
                              "DEFAULT = " + str(batch_size))
 
-    # HEURISTIC TYPE (-hr or --heuristic) - Specified the heuristic used to compute the reward for the state/action pair.
+    # REWARDS METHOD (-rw or --reward) - Specified the method used to compute the reward
+    # for the state/action pair.
     # Possible values:
-    # - 'game': Heuristic based directly on game score (the reward is based on the score increase of the action)
-    # - 'heuristic': Heuristic based on the quality of the board after applying an action
+    # - 'game': Method based directly on game score (the reward is based on the score increase of the action)
+    # - 'heuristic': Method based on the quality of the board after applying an action
     # All heuristics are properly defined within the compute_reward function
 
-    parser.add_argument('-hr',
-                        '--heuristic',
+    parser.add_argument('-rw',
+                        '--reward',
                         choices=['game', 'heuristic'],
-                        help="(AI ONLY) Sets the heuristic to be used to compute the reward for a state/action pair. "
-                             "DEFAULT: " + heuristic)
+                        help="(AI ONLY) Sets the method to be used to compute the reward for a state/action pair. "
+                             "DEFAULT: " + rewards_method)
 
     # GAMMA (-g or --gamma) - Initial value for the gamma variable (discount factor,
     # importance given to future rewards in Q-learning)
@@ -2338,8 +2376,8 @@ if __name__ == "__main__":
             print("INVALID VALUE: Batch size must be between 1 and the maximum experience replay size. Passed: " + str(batch_size))
             sys.exit()
 
-    if arguments['heuristic'] is not None:
-        heuristic = arguments['heuristic']
+    if arguments['reward'] is not None:
+        rewards_method = arguments['reward']
 
     if arguments['gamma'] is not None:
         gamma = arguments['gamma']
@@ -2423,7 +2461,7 @@ if __name__ == "__main__":
                                               total_epochs,
                                               experience_replay_size,
                                               seed,
-                                              heuristic)
+                                              rewards_method)
         elif agent_type == 'random_old':
             agent = random_agent_old.RandomAgentOld(seed)
 

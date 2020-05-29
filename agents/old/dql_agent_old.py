@@ -33,7 +33,7 @@ class DQLAgentOld:
     """
 
     def __init__(self, learning_rate, gamma, epsilon, epsilon_decay, minimum_epsilon,
-                 batch_size, total_epochs, experience_replay_size, seed, heuristic):
+                 batch_size, total_epochs, experience_replay_size, seed, rewards_method):
         """
         Constructor of the class. Creates an agent from the specified information
 
@@ -46,7 +46,7 @@ class DQLAgentOld:
         :param total_epochs: Total amount of epochs that will be performed
         :param experience_replay_size: The maximum size of the experience replay
         :param seed: Seed to be used for all random choices. If None, a random seed will be used
-        :param heuristic: Heuristic used to compute the reward. Only used to differentiate when storing results
+        :param rewards_method: Method used to compute the reward. Only used to differentiate when storing results
         """
 
         # Create a dictionary to link every output of the agent to an actual action
@@ -97,8 +97,8 @@ class DQLAgentOld:
         # Store the total epochs to be performed
         self.total_epochs = total_epochs
 
-        # Store the heuristic that has been used
-        self.heuristic = heuristic
+        # Store the rewards method that has been used
+        self.rewards_method = rewards_method
 
         # Internal variables #
 
@@ -292,7 +292,7 @@ class DQLAgentOld:
             mkdir(join("results", class_name))
 
         # If there is not a folder for this specific configuration, create it
-        folder_name = "g" + str(self.gamma) + "eps" + str(self.initial_epsilon) + "seed" + str(self.seed) + "epo" + str(self.total_epochs) + "heur" + self.heuristic
+        folder_name = "g" + str(self.gamma) + "eps" + str(self.initial_epsilon) + "seed" + str(self.seed) + "epo" + str(self.total_epochs) + "rew" + self.rewards_method
 
         if not exists(join("results", class_name, folder_name)):
             mkdir(join("results", class_name, folder_name))
@@ -344,7 +344,7 @@ class DQLAgentOld:
 
         # Store the info for the current epoch into a CSV
         class_name = self.__class__.__name__
-        folder_name = "g" + str(self.gamma) + "eps" + str(self.initial_epsilon) + "seed" + str(self.seed) + "epo" + str(self.total_epochs) + "heur" + self.heuristic
+        folder_name = "g" + str(self.gamma) + "eps" + str(self.initial_epsilon) + "seed" + str(self.seed) + "epo" + str(self.total_epochs) + "heur" + self.rewards_method
         with open(join("results", class_name, folder_name, class_name + "_" + folder_name + "_data.csv"), 'a', newline='') as file:
             # Create the writer
             writer = csv.writer(file)
