@@ -29,7 +29,8 @@ class DQLAgentOld:
     - Experience replay
     - Epsilon-greedy policy for selecting the action (exploration-exploitation)
 
-    This agent was designed for the original implementation approach (where each action is a possible input of the player)
+    This agent was designed with the "old" or "original" approach taken. This approach considered that the possible
+    actions were the possible player inputs (left, right, rotate or hard drop).
     """
 
     def __init__(self, learning_rate, gamma, epsilon, epsilon_decay, minimum_epsilon,
@@ -70,6 +71,7 @@ class DQLAgentOld:
         self.epsilon = epsilon
         self.epsilon_decay = epsilon_decay
         self.minimum_epsilon = minimum_epsilon
+        print(self.epsilon_decay)
 
         # Creates the experience replay container
         # A deque is used to have a queue (oldest experiences in the experience replay go out first)
@@ -114,6 +116,9 @@ class DQLAgentOld:
         # Mark this agent as an OLD agent (using the original implementation, where ACTION = user input)
         self.agent_type = "old"
 
+        # Compute the class and file name (used to store results)
+        self.class_name = self.__class__.__name__
+        self.folder_name = "g" + str(self.gamma) + "eps" + str(self.initial_epsilon) + "seed" + str(self.seed) + "epo" + str(self.total_epochs) + "rew" + self.rewards_method
 
     # Internal methods
 
@@ -251,9 +256,7 @@ class DQLAgentOld:
 
     def insert_experience(self, state, action, reward, next_state, terminated):
         """
-        Creates an experience and stores it into the experience replay of the agent
-
-        If enough experiences have been inserted, train the Q Network
+        Creates an experience and stores it into the replay memory of the agent
 
         :param state: Initial state
         :param action: Action taken in the initial state
@@ -286,24 +289,20 @@ class DQLAgentOld:
             mkdir("results")
 
         # If the agent name does not exist within results, create the folder
-        class_name = self.__class__.__name__
-
-        if not exists(join("results", class_name)):
-            mkdir(join("results", class_name))
+        if not exists(join("results", self.class_name)):
+            mkdir(join("results", self.class_name))
 
         # If there is not a folder for this specific configuration, create it
-        folder_name = "g" + str(self.gamma) + "eps" + str(self.initial_epsilon) + "seed" + str(self.seed) + "epo" + str(self.total_epochs) + "rew" + self.rewards_method
-
-        if not exists(join("results", class_name, folder_name)):
-            mkdir(join("results", class_name, folder_name))
+        if not exists(join("results", self.class_name, self.folder_name)):
+            mkdir(join("results", self.class_name, self.folder_name))
 
         # If the weights folder does not exist within this specific instance of the agent, create it
-        if not exists(join("results", class_name, folder_name, "weights")):
-            mkdir(join("results", class_name, folder_name, "weights"))
+        if not exists(join("results", self.class_name, self.folder_name, "weights")):
+            mkdir(join("results", self.class_name, self.folder_name, "weights"))
 
         # Create a new CSV to store the results
         # Since the file is created freshly every time, we are guaranteed that it will exist later
-        with open(join("results", class_name, folder_name, class_name + "_" + folder_name + "_data.csv"), 'w', newline='') as file:
+        with open(join("results", self.class_name, self.folder_name, self.class_name + "_" + self.folder_name + "_data.csv"), 'w', newline='') as file:
             # Create the writer
             writer = csv.writer(file)
             # Create the column names
@@ -335,7 +334,7 @@ class DQLAgentOld:
         self._update_target_network()
 
         # Update the epsilon with the epsilon decay (and check that it doesn't go below 0)
-        self.epsilon = self.epsilon - self.epsilon_decay * self.current_epoch
+        self.epsilon = self.initial_epsilon - self.epsilon_decay * self.current_epoch
         if self.epsilon < self.minimum_epsilon:
             self.epsilon = self.minimum_epsilon
 
@@ -343,9 +342,7 @@ class DQLAgentOld:
         print("EPOCH " + str(self.current_epoch) + " FINISHED (Lines: " + str(lines) + "/Score: " + str(score) + "/Actions: " +  str(self.actions_performed) + ")")
 
         # Store the info for the current epoch into a CSV
-        class_name = self.__class__.__name__
-        folder_name = "g" + str(self.gamma) + "eps" + str(self.initial_epsilon) + "seed" + str(self.seed) + "epo" + str(self.total_epochs) + "heur" + self.rewards_method
-        with open(join("results", class_name, folder_name, class_name + "_" + folder_name + "_data.csv"), 'a', newline='') as file:
+        with open(join("results", self.class_name, self.folder_name, self.class_name + "_" + self.folder_name + "_data.csv"), 'a', newline='') as file:
             # Create the writer
             writer = csv.writer(file)
             # Insert the data
@@ -353,7 +350,7 @@ class DQLAgentOld:
 
         # Store the weights into a folder (only every 10 epochs, to save size)
         if self.current_epoch % 10 == 0:
-            self.q_network.save_weights(join("results", class_name, folder_name, "weights", class_name + "_" + folder_name +  "_epoch" +
+            self.q_network.save_weights(join("results", self.class_name, self.folder_name, "weights", self.class_name + "_" + self.folder_name +  "_epoch" +
                                              str(self.current_epoch) + ".h5"))
 
         # Reset the action counter

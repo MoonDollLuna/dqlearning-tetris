@@ -2,3 +2,5 @@ results/*
 *.h5
 *.png
 *.csv
+*.eps
+*.txt

@@ -53,7 +53,7 @@ import os.path
 import numpy as np
 
 # Import used for our own agent scripts
-from agents.old import dql_agent_old, random_agent_old
+from agents.old import dql_agent_old, weighted_agent_old ,random_agent_old
 
 import pygame
 
@@ -265,7 +265,11 @@ ai_learning = False
 # Set using --seed
 seed = None
 
-# Set type of agent to be used. Default value is Standard. Only relevant when using AI (training or playing)
+# Set type of agent to be used. Default value is Standard (Old). Only relevant when using AI (training or playing)
+# Existing agent types:
+#   * Standard (old): Standard DQL Agent using the original approach (action = player input)
+#   * Weighted (old): Variation of the Standard (old) agent using weights for the actions when randomly choosing them
+#   * Random (old): Agent exclusively used in Play mode. Acts randomly, serves as a baseline
 # Set using --agenttype
 agent_type = 'standard_old'
 
@@ -282,7 +286,7 @@ fast_training = False
 
 # Maximum amount of elements contained within the Experience Replay. Default value is specified below
 # Set using --experiencereplaysize
-experience_replay_size = 5000
+experience_replay_size = 20000
 
 # Batch size used to sample from the Experience Replay. Default value is specified below
 # Set using --batchsize
@@ -1345,7 +1349,7 @@ def compute_heuristic_state_score(locked_pieces, current_piece, piece_locked):
     return -0.51 * aggregate_height + 0.76 * complete_lines - 0.36 * holes - 0.18 * bumpiness
 
 
-def compute_reward(game_finished, action, piece_locked, lines_cleared, lowest_position_filled,
+def compute_reward(game_finished, piece_locked, lines_cleared, lowest_position_filled,
                    current_piece, locked_pieces, previous_score):
     """
     Computes the reward for a pair of state, action taking into account some details
@@ -1357,7 +1361,6 @@ def compute_reward(game_finished, action, piece_locked, lines_cleared, lowest_po
                    The reward is (new state heuristic) - (previous state heuristic).
 
     :param game_finished: TRUE if the action caused the end of the game, FALSE otherwise
-    :param action: Action taken to reach this state
     :param piece_locked: TRUE if the piece has been locked, FALSE otherwise
     :param lines_cleared: (Only if piece_locked = TRUE) How many lines were cleared with the locked piece.
     :param lowest_position_filled: (Only if piece_locked = TRUE) The lowest Y value reached by the locked piece.
@@ -1378,11 +1381,10 @@ def compute_reward(game_finished, action, piece_locked, lines_cleared, lowest_po
         
         The reward computed is as follows:
         * If the game is finished, REWARD = -10 (we don't want the agent to lose)
-        * If no piece has been locked:
-            * Action moved the piece (left or right), REWARD = -0.1 (we don't want the agent to wobble)
-            * Action didn't move the piece (rotate), REWARD = 0 (rotating is a free action, to incentivize the agent to rotate)
+        * If no piece has been locked: REWARD = -0.1 (we want the agent to act)
         * If a piece has been locked:
-            * No line cleared, REWARD = lowest_position_filled / 10 (locking pieces is good, the deeper the better)
+            * No line cleared, REWARD = (lowest_position_filled / 10) - 1 (locking pieces is good, the deeper the better)
+              However, locking pieces above half of the stack height starts being penalized.
             * Lines cleared, REWARD = +2^(lines_cleared + 1) (the more lines that are cleared at once, the better the state is)
         """
 
@@ -1391,16 +1393,12 @@ def compute_reward(game_finished, action, piece_locked, lines_cleared, lowest_po
             return -10, None
         # Game not finished but piece not locked: very small penalty (want the agent to try to lock fast)
         elif not piece_locked:
-            # Action was a rotation: no penalty
-            if action == 'rotate':
-                return 0, None
-            # Else, small penalty to avoid wobbling
-            else:
-                return -0.1, None
+            return -0.1, None
+        # Piece locked: compute a reward appropiately
         else:
             # 0 lines locked: reward based on the lowest depth filled
             if lines_cleared == 0:
-                return lowest_position_filled / 10, None
+                return (lowest_position_filled / 10) - 1, None
             # 1 or more lines locked: give the agent a bigger reward (more lines = better reward)
             else:
                 return 2 ** (lines_cleared + 1), None
@@ -2063,7 +2061,6 @@ def main_ai_learn(win):
                 new_state = generate_state(locked_positions, current_piece)
                 # Reward for the state/action pair
                 reward, previous_state_score = compute_reward(not run,
-                                                              action,
                                                               final_state,
                                                               lines_cleared_store,
                                                               lowest_y,
@@ -2214,7 +2211,7 @@ if __name__ == "__main__":
 
     parser.add_argument('-at',
                         '--agenttype',
-                        choices=['standard_old', 'random_old'],
+                        choices=['standard_old', 'weighted_old', 'random_old'],
                         help="(AI ONLY) Sets the type of agent to be used. Note that agents with '-old' in the "
                              "name use the old, single-action based approach (action = actual game input), as opposed "
                              "to the approach used by the other agents (action = final position of the current piece). "
@@ -2462,6 +2459,17 @@ if __name__ == "__main__":
                                               experience_replay_size,
                                               seed,
                                               rewards_method)
+        elif agent_type == 'weighted_old':
+            agent = weighted_agent_old.WeightedAgentOld(learning_rate,
+                                                        gamma,
+                                                        epsilon,
+                                                        epsilon_decay,
+                                                        minimum_epsilon,
+                                                        batch_size,
+                                                        total_epochs,
+                                                        experience_replay_size,
+                                                        seed,
+                                                        rewards_method)
         elif agent_type == 'random_old':
             agent = random_agent_old.RandomAgentOld(seed)
 
