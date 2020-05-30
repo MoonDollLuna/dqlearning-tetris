@@ -15,6 +15,7 @@ import csv
 from os.path import splitext
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 # MAIN SCRIPT #
 
@@ -88,10 +89,10 @@ for elements in files_loaded:
         # Ignore the titles
         next(rows, None)
         for row in rows:
-            internal_epochs.append(row[0])
-            internal_lines.append(row[2])
-            internal_scores.append(row[1])
-            internal_actions.append(row[3])
+            internal_epochs.append(int(row[0]))
+            internal_lines.append(int(row[2]))
+            internal_scores.append(int(row[1]))
+            internal_actions.append(int(row[3]))
 
     # Insert the elements
     epochs.append((legend_name, internal_epochs))
@@ -103,21 +104,90 @@ for elements in files_loaded:
 
 # LINES:
 
+# Create the figure
+plt.figure(figsize=(12,8))
+
 # Zip and start adding lines
-for (legend_name, epochs), (_, lines) in zip(epochs, lines):
-    plt.plot(epochs, lines)
+for (legend_name, internal_epochs), (_, internal_lines) in zip(epochs, lines):
+    plt.plot(internal_epochs, internal_lines, label=legend_name)
 
 # Add the title and the axes title
-plt.title('LINEAS ELIMINADAS - ' + title)
+plt.title('LINEAS ELIMINADAS' if title is None else ('LINEAS ELIMINADAS (' + title + ')'))
 plt.xlabel('Epochs realizados')
 plt.ylabel('Lineas eliminadas')
 
-# Ensure that the X axis is not overcrowded
+# Specify the number of ticks for the X axis (11 ticks)
+plt.locator_params(axis='x', nbins=11)
+
+# Specify the ticks for the Y axis (fixed to 100)
+plt.yticks(np.arange(0, 101, 10))
 
 # Show the legend
 plt.legend()
 
-# Show the plot and store it
-plt.savefig('Lineas-' + title + '.png', bbox_inches='tight')
-plt.show()
+# Store the figure
+# Figures are saved twice: in .png format (for human viewing) and .eps format (to insert them into LaTeX)
+plt.savefig('lineas.png' if title is None else 'lineas-'+title+'.png', bbox_inches='tight', dpi=1200)
+plt.savefig('lineas.eps' if title is None else 'lineas-'+title+'.eps', bbox_inches='tight', format='eps', dpi=1200)
+print("Lines plot stored")
 
+# SCORE:
+
+# Create the figure
+plt.figure(figsize=(12,8))
+
+# Zip and start adding lines
+for (legend_name, internal_epochs), (_, internal_scores) in zip(epochs, scores):
+    plt.plot(internal_epochs, internal_scores, label=legend_name)
+
+
+# Add the title and the axes title
+plt.title('PUNTUACIÓN OBTENIDA' if title is None else ('PUNTUACIÓN OBTENIDA (' + title + ')'))
+plt.xlabel('Epochs realizados')
+plt.ylabel('Puntuación obtenida')
+
+# Specify the number of ticks for the X axis (11 ticks)
+plt.locator_params(axis='x', nbins=11)
+
+# Fix the Y axis to 0
+plt.ylim(bottom=0)
+
+# Show the legend
+plt.legend()
+
+# Store the figure
+plt.savefig('puntuacion.png' if title is None else 'puntuacion-'+title+'.png', bbox_inches='tight', dpi=1200)
+plt.savefig('puntuacion.eps' if title is None else 'puntuacion-'+title+'.eps', bbox_inches='tight', format='eps', dpi=1200)
+print("Scores plot stored")
+
+# ACTIONS TAKEN
+
+# Create the figure
+plt.figure(figsize=(12,8))
+
+# Zip and start adding lines
+for (legend_name, internal_epochs), (_, internal_actions) in zip(epochs, actions):
+    plt.plot(internal_epochs, internal_actions, label=legend_name)
+
+
+# Add the title and the axes title
+plt.title('ACCIONES REALIZADAS' if title is None else ('ACCIONES REALIZADAS (' + title + ')'))
+plt.xlabel('Epochs realizados')
+plt.ylabel('Acciones realizadas')
+
+# Specify the number of ticks for the X axis (11 ticks)
+plt.locator_params(axis='x', nbins=11)
+
+# Fix the Y axis to 0
+plt.ylim(bottom=0)
+
+# Show the legend
+plt.legend()
+
+# Store the figure
+plt.savefig('acciones.png' if title is None else 'acciones-'+title+'.png', bbox_inches='tight', dpi=1200)
+plt.savefig('acciones.eps' if title is None else 'acciones-'+title+'.eps', bbox_inches='tight', format='eps', dpi=1200)
+print("Actions taken plot stored")
+
+# Display all figures
+plt.show()
