@@ -120,6 +120,9 @@ class DQLAgentOld:
         self.class_name = self.__class__.__name__
         self.folder_name = "g" + str(self.gamma) + "eps" + str(self.initial_epsilon) + "seed" + str(self.seed) + "epo" + str(self.total_epochs) + "rew" + self.rewards_method
 
+        # Keep track of the total Q values obtained
+        self.q_values = 0.0
+
     # Internal methods
 
     def _return_version(self):
@@ -235,10 +238,16 @@ class DQLAgentOld:
         For the current state, return the optimal action to take or a random action randomly
         :param state: The current state provided by the game
         :return: The action taken (as a string) and, if applicable, the set of Q-Values for each action
+                 (Q-Values will only be passed when not performing a random action)
         """
 
         # Count the action
         self.actions_performed += 1
+
+        # Prepare the state for the neural network
+        state = np.expand_dims(state, axis=0)
+        # Predict the q-values for the state (will be needed anyways to keep track of the values)
+        q_values = self.q_network.predict(state)
 
         # Generate a random number
         random_chance = np.random.rand()
@@ -246,13 +255,17 @@ class DQLAgentOld:
         # Check if the value is smaller (random action) or greater (optimal action) than epsilon
         if random_chance < self.epsilon:
             # Take a random action from the actions dictionary
-            # The strings are directly sampled in this case
-            return np.random.choice(list(self.actions.values())), None
+            action = np.random.choice(list(self.actions.keys()))
+
+            # Add the appropriate value to the value counter and return the action
+            # (no Q-Values will be returned in this case)
+            self.q_values += q_values[0][action]
+            return self.actions[action], None
         else:
-            # Prepare the state for the neural network and take the optimal action
-            state = np.expand_dims(state, axis=0)
-            q_values = self.q_network.predict(state)
-            return self.actions[np.argmax(q_values[0])], q_values
+            # Choose the best action and add the value to the value counter
+            action = np.argmax(q_values[0])
+            self.q_values += q_values[0][action]
+            return self.actions[action], q_values
 
     def insert_experience(self, state, action, reward, next_state, terminated):
         """
@@ -270,6 +283,9 @@ class DQLAgentOld:
 
         # Store everything as a tuple
         self.experience_replay.append((state, action, reward, next_state, terminated))
+
+        # Train the network
+        self._learn_from_replay()
 
     def initialize_learning_structure(self):
         """
@@ -355,6 +371,9 @@ class DQLAgentOld:
 
         # Reset the action counter
         self.actions_performed = 0
+
+        # Reset the Q-Values counter
+        self.q_values = 0.0
 
         # Update the epoch
         self.current_epoch += 1

@@ -21,8 +21,12 @@
 #       9 - Main loop auxiliary methods (mostly methods shared by all loops)
 #       10 - Main loop methods
 #           10A - Player main loop
-#           10B - AI Player main loop
-#           10C - AI Learner main loop
+#           10B - "Old" approach methods
+#               10Ba - AI Player main loop
+#               10Bb - AI Learner main loop
+#           10C - "New" approach methods
+#               10Ca - AI Player main loop
+#               10Cb - AI Learner main loop
 #           10D - Main menu logic
 #       11 - Main method
 #           11A - Argument definition
@@ -49,11 +53,14 @@ import argparse
 import copy
 import random
 import os.path
+from collections import deque
 
 import numpy as np
 
+
 # Import used for our own agent scripts
-from agents.old import dql_agent_old, weighted_agent_old ,random_agent_old
+from agents.old import dql_agent_old, weighted_agent_old, random_agent_old
+from agents.new import dql_agent_new
 
 import pygame
 
@@ -267,11 +274,14 @@ seed = None
 
 # Set type of agent to be used. Default value is Standard (Old). Only relevant when using AI (training or playing)
 # Existing agent types:
+#   * Standard (new): Standard DQL Agent using the new approach (action = final position of the piece)
+#   * Prioritized (new): Variation of the Standard (new) agent using Prioritized Experience Replay (PER)
+#   * Random (new): Agent exclusively used in Play mode. Acts randomly, serves as a baseline
 #   * Standard (old): Standard DQL Agent using the original approach (action = player input)
 #   * Weighted (old): Variation of the Standard (old) agent using weights for the actions when randomly choosing them
 #   * Random (old): Agent exclusively used in Play mode. Acts randomly, serves as a baseline
 # Set using --agenttype
-agent_type = 'standard_old'
+agent_type = 'standard_new'
 
 # Loaded weights for the AI Player. Only used when there is an AI player active (not while learning). Default value is
 # None if not specified
@@ -290,7 +300,7 @@ experience_replay_size = 20000
 
 # Batch size used to sample from the Experience Replay. Default value is specified below
 # Set using --batchsize
-batch_size = 512
+batch_size = 32
 
 # Method used to compute the rewards. There are two possible values:
 # * 'game' for a method based directly on the game score
@@ -300,17 +310,17 @@ rewards_method = 'game'
 
 # Gamma value used by DQL (learning rate of DQL). Default value is specified below
 # Set using --gamma
-gamma = 0.6
+gamma = 0.99
 
 # Epsilon value used by DQL (chance to perform a random action in exploration-exploitation)
 # Default value is specified below
 # Set using --epsilon
-epsilon = 0.85
+epsilon = 1
 
 # Epsilon percentage for minimum used by DQL (decrease the epsilon value linearly every epoch until this percentage of
 # epochs have been completed). After this percentage, epsilon = minimum_epsilon
 # Set using --epsilonpercentage
-epsilon_percentage = 80
+epsilon_percentage = 75
 
 # Minimum epsilon value used by DQL (the minimum value of epsilon, achieved after epsilon_percentage percent of epochs
 # have passed)
@@ -319,11 +329,11 @@ minimum_epsilon = 0.05
 
 # Learning rate used by the neural network. Default value is specified below
 # Set using --learningrate
-learning_rate = 0.01
+learning_rate = 0.001
 
 # Number of epochs used to train the agent. Default value is specified below.
 # Set using --epochs
-total_epochs = 1000
+total_epochs = 2000
 
 
 #####################
@@ -881,7 +891,7 @@ def compute_score(lines_cleared, lowest_y, level):
 
     If the game is in AI mode or the fixed speed flag is set, the score is simplified:
     * 1 if no lines have been cleared
-    * 2^(lines_cleared) if lines have been cleared (so 2, 4, 8 or 16 points)
+    * 10 * 2^(lines_cleared-1) if lines have been cleared (so 10, 20, 40 or 80 points)
 
     :return: Computed score
     """
@@ -894,7 +904,7 @@ def compute_score(lines_cleared, lowest_y, level):
             return 1
         else:
             # Lines cleared
-            return 2 ** lines_cleared
+            return 10 * (2 ** (lines_cleared - 1))
     else:
         # INACTIVE: Use the standard scoring system
         if lines_cleared == 0:
@@ -917,8 +927,7 @@ def draw_state(surface, state, initial_x, initial_y, grid_block_size):
 
     The state will be drawn as a small grid, with each cell having the specified color:
     * BLACK if the cell is empty
-    * GRAY if the cell is occupied by a locked piece
-    * WHITE if the cell is occupied by the currently active piece
+    * WHITE if the cell is occupied (either by a locked piece or by the current piece)
 
     :param surface: Surface in which to draw everything
     :param state: Current state, already processed (20x10 matrix)
@@ -935,11 +944,9 @@ def draw_state(surface, state, initial_x, initial_y, grid_block_size):
     for (y, x), element in np.ndenumerate(state):
 
         # Set the color depending on the value of the element
-        # (0 is black, 1 is gray, 2 is white)
+        # (0 is black, 1 is white)
         if element == 0:
             color = (0, 0, 0)
-        elif element == 1:
-            color = (128, 128, 128)
         else:
             color = (255, 255, 255)
 
@@ -953,7 +960,7 @@ def draw_state(surface, state, initial_x, initial_y, grid_block_size):
                          0)
 
 
-def draw_ai_player_information(surface, current_state, q_values, action, actions_taken):
+def draw_ai_player_old_information(surface, current_state, q_values, action, actions_taken):
     """
     Draws relevant information for the AI player (in order to visualize the choices being taken)
 
@@ -1065,8 +1072,8 @@ def draw_ai_player_information(surface, current_state, q_values, action, actions
     surface.blit(total_actions_text, (hud_begin_x, total_actions_y))
 
 
-def draw_ai_learn_information(surface, current_state, next_state, action, reward, current_epoch, actions_performed,
-                              current_epsilon, best_epoch, best_score, best_lines, best_actions_performed):
+def draw_ai_learn_old_information(surface, current_state, next_state, action, reward, current_epoch, actions_performed,
+                                  current_epsilon, best_epoch, best_score, best_lines, best_actions_performed):
     """
     Draws relevant information for the AI learner (in order to visualize the inner workings)
 
@@ -1156,6 +1163,170 @@ def draw_ai_learn_information(surface, current_state, next_state, action, reward
     surface.blit(best_epoch_actions_text, (hud_begin_x, best_epoch_actions_y))
 
 
+def draw_ai_player_new_information(surface, target_state, q_value, last_step, actions_taken, steps_taken):
+    """
+    Draws relevant information for the AI player (in order to visualize the choices being taken)
+    This method is used only for "new" approach AI players
+
+    :param surface: Surface in which to draw the information
+    :param target_state: State to be reached by moving the piece
+    :param q_value: Q-Value of the chosen action
+    :param last_step: Last step taken by the agent
+    :param actions_taken: Total number of actions taken
+    :param steps_taken: Total number of steps taken
+    """
+
+    # Create a rectangle for the additional HUD
+    pygame.draw.rect(surface, background_color, (screen_width, 0, screen_width_extra, screen_height), 0)
+    pygame.draw.rect(surface, playground_border_color, (screen_width, 0, screen_width_extra, screen_height), 5)
+
+    # Identify where to place the additional AI HUD
+    hud_begin_x = screen_width + 25
+
+    # Create all necessary fonts
+    small_font = pygame.font.Font(font_path, 10)
+    big_font = pygame.font.Font(font_path, 15)
+
+    # AGENT BEING USED
+    agent_y = 15
+    agent_text = small_font.render('AGENT: ' + agent.__class__.__name__, 1, (0, 0, 0))
+    surface.blit(agent_text, (hud_begin_x, agent_y))
+
+    # TARGET ACTION
+
+    # Title
+    target_y = 40
+
+    # Write the state title and print it
+    target_text = big_font.render('GOAL STATE:', 1, (0, 0, 0))
+    surface.blit(target_text, (hud_begin_x + ((screen_width + screen_width_extra) - hud_begin_x - 25) // 2 - target_text.get_width() / 2,
+                               target_y + 25 - target_text.get_height() / 2))
+
+    # Draw the state itself
+    draw_state(win, target_state, screen_width + 75, 100, 15)
+
+    # Q-VALUE OF THE STATE
+    q_value_y = 450
+    q_value_text = small_font.render('Q-VALUE: ' + str(q_value[0]), 1, (0, 0, 0))
+    surface.blit(q_value_text, (hud_begin_x, q_value_y))
+
+    # LAST STEP
+    step_y = 550
+    step_text = small_font.render('LAST STEP: ' + last_step, 1, (0, 0, 0))
+    surface.blit(step_text, (hud_begin_x, step_y))
+
+    # TOTAL ACTIONS AND STEPS TAKEN
+    total_actions_y = 700
+    total_actions_text = small_font.render('TOTAL ACTIONS TAKEN: ' + str(actions_taken), 1, (0, 0, 0))
+    surface.blit(total_actions_text, (hud_begin_x, total_actions_y))
+
+    total_steps_y = 740
+    total_steps_text = small_font.render('TOTAL STEPS TAKEN: ' + str(steps_taken), 1, (0, 0, 0))
+    surface.blit(total_steps_text, (hud_begin_x, total_steps_y))
+
+
+def draw_ai_learn_new_information(surface, current_epoch, original_state, goal_state, q_value, actions_taken, steps_taken,
+                                  current_epsilon, best_epoch, best_lines, best_score, best_actions, best_steps):
+    """
+    Draws relevant information for the AI learner (in order to visualize the inner workings)
+
+    :param surface: Surface in which to draw the information
+    :param current_epoch: Current epoch
+    :param original_state: Original state received by the agent, in order to visualize it
+    :param goal_state: State reached from the original state, in order to visualize it
+    :param q_value: Q-Value for the goal state
+    :param actions_taken: Total amounts of actions performed in this epoch
+    :param steps_taken: Total amount of steps (piece movements) performed in this epoch
+    :param current_epsilon: Value of epsilon in this epoch
+    :param best_epoch: Epoch where the best values were found
+    :param best_score: Amount of lines cleared during the best epoch
+    :param best_lines: Score achieved during the best epoch
+    :param best_actions: Actions performed during the best epoch
+    :param best_steps: Steps performed during the best epoch
+    """
+
+    # Create a rectangle for the additional HUD
+    pygame.draw.rect(surface, background_color, (screen_width, 0, screen_width_extra, screen_height), 0)
+    pygame.draw.rect(surface, playground_border_color, (screen_width, 0, screen_width_extra, screen_height), 5)
+
+    # Identify where to place the additional AI HUD
+    hud_begin_x = screen_width + 25
+
+    # Create necessary fonts
+    small_font = pygame.font.Font(font_path, 15)
+    tiny_font = pygame.font.Font(font_path, 10)
+
+    # AGENT BEING USED
+    agent_y = 15
+    agent_text = tiny_font.render('AGENT: ' + agent.__class__.__name__, 1, (0, 0, 0))
+    surface.blit(agent_text, (hud_begin_x, agent_y))
+
+    # CURRENT EPOCH TITLE
+    epoch_title_y = 40
+    epoch_title_text = small_font.render('CURRENT EPOCH: ' + str(current_epoch), 1, (0, 0, 0))
+    surface.blit(epoch_title_text, (hud_begin_x + ((screen_width + screen_width_extra) - hud_begin_x - 25) // 2 - epoch_title_text.get_width() / 2,
+                                    epoch_title_y + 25 - epoch_title_text.get_height() / 2))
+
+    # STATES
+
+    # Title height
+    state_x = hud_begin_x + 15
+    state_y = 70
+    # Write the state titles and print them
+    original_state_text = small_font.render('ORIGINAL', 1, (0, 0, 0))
+    surface.blit(original_state_text, (state_x, state_y + 25 - original_state_text.get_height() / 2))
+
+    goal_state_text = small_font.render('GOAL', 1, (0, 0, 0))
+    surface.blit(goal_state_text, (state_x + 150, state_y + 25 - goal_state_text.get_height() / 2))
+
+    # Draw the states themselves
+    draw_state(surface, original_state, state_x, 130, 10)
+    draw_state(surface, goal_state, state_x + 120, 130, 10)
+
+    #Q VALUE
+    q_value_y = 350
+    q_value_text = tiny_font.render('Q-VALUE: ' + str(q_value[0]), 1, (0, 0, 0))
+    surface.blit(q_value_text, (hud_begin_x, q_value_y))
+
+    # ACTIONS AND STEPS
+    actions_y = 450
+    actions_text = tiny_font.render('ACTIONS TAKEN: ' + str(actions_taken), 1, (0, 0, 0))
+    surface.blit(actions_text, (hud_begin_x, actions_y))
+
+    steps_y = 480
+    steps_text = tiny_font.render('STEPS TAKEN: ' + str(steps_taken), 1, (0, 0, 0))
+    surface.blit(steps_text, (hud_begin_x, steps_y))
+
+    # CURRENT EPSILON
+
+    epsilon_y = 530
+    epsilon_text = tiny_font.render('CURRENT EPSILON: ' + str(current_epsilon), 1, (0, 0, 0))
+    surface.blit(epsilon_text, (hud_begin_x, epsilon_y))
+
+    # BEST EPOCH
+    best_epoch_title_y = 600
+    best_epoch_title_text = small_font.render('BEST EPOCH: ' + str(best_epoch), 1, (0, 0, 0))
+    surface.blit(best_epoch_title_text, (
+    hud_begin_x + ((screen_width + screen_width_extra) - hud_begin_x - 25) // 2 - best_epoch_title_text.get_width() / 2,
+    best_epoch_title_y + 25 - best_epoch_title_text.get_height() / 2))
+
+    best_epoch_lines_y = 680
+    best_epoch_lines_text = tiny_font.render('LINES: ' + str(best_lines), 1, (0, 0, 0))
+    surface.blit(best_epoch_lines_text, (hud_begin_x, best_epoch_lines_y))
+
+    best_epoch_score_y = 710
+    best_epoch_score_text = tiny_font.render('SCORE: ' + str(best_score), 1, (0, 0, 0))
+    surface.blit(best_epoch_score_text, (hud_begin_x, best_epoch_score_y))
+
+    best_epoch_actions_y = 740
+    best_epoch_actions_text = tiny_font.render('ACTIONS TAKEN: ' + str(best_actions), 1, (0, 0, 0))
+    surface.blit(best_epoch_actions_text, (hud_begin_x, best_epoch_actions_y))
+
+    best_epoch_steps_y = 770
+    best_epoch_steps_text = tiny_font.render('STEPS TAKEN: ' + str(best_steps), 1, (0, 0, 0))
+    surface.blit(best_epoch_steps_text, (hud_begin_x, best_epoch_steps_y))
+
+
 # GAMEPLAY #
 
 def generate_state(locked_positions, current_piece):
@@ -1164,8 +1335,7 @@ def generate_state(locked_positions, current_piece):
 
     The state will be store as a 20x10 numpy matrix, where each cell can have one of the following values:
     - 0: empty
-    - 1: occupied
-    - 2: occupied by current piece
+    - 1: occupied (by a locked piece or the current piece)
 
     In order to not give the AI more information than what a human player would have, only the positions that can be
     viewed will be included into the state. This means that the four rows ABOVE the screen (where the piece spawns)
@@ -1183,14 +1353,161 @@ def generate_state(locked_positions, current_piece):
     for (j, i) in locked_positions.keys():
         grid[i][j] = 1
 
-    # Obtain the positions of the current piece and change them to 2
+    # Obtain the positions of the current piece and change them to 1
     piece_positions = generate_shape_positions(current_piece)
     for (x, y) in piece_positions:
         # Ignore negative positions (they're still out of bounds)
         if x >= 0 and y >= 0:
-            grid[y][x] = 2
+            grid[y][x] = 1
 
     return np.array(grid)
+
+
+def generate_possible_actions(locked_positions, current_piece):
+    """
+    From the current locked positions and the current piece in place, generate all possible actions
+    (all possible column and rotations for the current piece in play)
+
+    This method is only used for the "new" approach (which considers the piece possible final positions as actions)
+    Only legal final positions will be returned (positions that CAN be reached by the agent)
+
+    The returned list of actions will have the structure
+    [(x_column, rotation, state)]
+
+    :param locked_positions: The current grid of the game
+    :param current_piece: The current piece being played
+    :return: A list A of possible actions
+    """
+
+    # Store the actions in a list
+    actions = []
+
+    # Store the initial piece X, Y and Rotation values
+    original_x = current_piece.x
+    original_y = current_piece.y
+    original_rot = current_piece.rotation
+
+    # Generate the current grid
+    grid = create_grid(locked_positions)
+
+    # Obtain all possible rotations for the current piece
+    rotation_amount = len(current_piece.shape)
+
+    # Loop, for all possible rotations
+    for rot in range(rotation_amount):
+        # For all possible X positions (from 0 to 9)
+        for x in range(10):
+
+            # Set the piece to the original position and rotation
+            current_piece.x = original_x
+            current_piece.y = original_y
+            current_piece.rotation = original_rot
+
+            # Boolean to check for legal moves
+            legal_move = True
+
+            # The piece will have to emulate being moved to the actual position
+            # Rotations - Rotate the piece (lowering its depth with every rotation)
+            for _ in range(rot):
+                current_piece.rotation += 1
+                current_piece.y += 1
+
+                # If an illegal position is reached at any point, mark the action as illegal
+                if not valid_space(current_piece, grid):
+                    legal_move = False
+
+            # Movements - Move the piece to the target position (lowering its depth with every movement)
+            x_difference = current_piece.x - x
+
+            # Difference < 0: move to the right / Difference > 0: move to the left
+            if x_difference < 0:
+                for _ in range(abs(x_difference)):
+                    current_piece.x += 1
+                    current_piece.y += 1
+
+                    # If an illegal position is reached at any point, mark the action as illegal
+                    if not valid_space(current_piece, grid):
+                        legal_move = False
+            elif x_difference > 0:
+                for _ in range(x_difference):
+                    current_piece.x -= 1
+                    current_piece.y += 1
+
+                    # If an illegal position is reached at any point, mark the action as illegal
+                    if not valid_space(current_piece, grid):
+                        legal_move = False
+
+            # If the position was marked as illegal, this action is not possible: remove it
+            if not legal_move:
+                continue
+
+            # While the position is valid, move down
+            # We move down until the piece is placed down
+            while valid_space(current_piece, grid):
+                current_piece.y += 1
+
+            # Once the position is not valid, move the piece upwards
+            # (return to the last valid position)
+            current_piece.y -= 1
+
+            # Generate the current state and store it into the dictionary
+            state = generate_state(locked_positions, current_piece)
+            actions.append((x, rot, state))
+
+    # Return the current piece to the original position
+    current_piece.x = original_x
+    current_piece.y = original_y
+    current_piece.rotation = original_rot
+
+    return actions
+
+
+def generate_movement_sequence(action, current_piece):
+    """
+    From a specified action with shape (x, rotation, state), generates the movement sequence.
+
+    The movement sequence is a queue of movements done by the agent to the piece.
+    The moves always follow this order:
+        1. Rotation
+        2. Displacement (left or right)
+        3. Hard drop (to place the action)
+
+    This method is only used by agents of the new approximation (that have a different action definition)
+
+    :param action: Action to be performed by the agent
+    :param current_piece: Current piece to apply the action on
+    :return: A queue of actions
+    """
+
+    # Queue to store the movements
+    movements = deque()
+
+    # Unpack the action
+    action_x, rotation, _ = action
+
+    # Add the rotations
+    for i in range(rotation):
+        movements.append('rotate')
+
+    # Check the X difference
+    x_difference = current_piece.x - action_x
+
+    # If the difference is positive, the final position of the piece is to the LEFT of the current piece
+    # Otherwise, it is to the RIGHT
+    # If the difference is 0, there is no need to move the piece
+    if x_difference < 0:
+        while x_difference < 0:
+            movements.append('right')
+            x_difference += 1
+    elif x_difference > 0:
+        while x_difference > 0:
+            movements.append('left')
+            x_difference -= 1
+
+    # Append a hard drop at the end, to lock the piece
+    movements.append('hard_drop')
+
+    return movements
 
 
 def compute_aggregate_height(state):
@@ -1349,10 +1666,12 @@ def compute_heuristic_state_score(locked_pieces, current_piece, piece_locked):
     return -0.51 * aggregate_height + 0.76 * complete_lines - 0.36 * holes - 0.18 * bumpiness
 
 
-def compute_reward(game_finished, piece_locked, lines_cleared, lowest_position_filled,
-                   current_piece, locked_pieces, previous_score):
+def compute_reward_old(game_finished, piece_locked, lines_cleared, lowest_position_filled,
+                       current_piece, locked_pieces, previous_score):
     """
     Computes the reward for a pair of state, action taking into account some details
+
+    This method is only applied to "old" agents
 
     There are currently two possible approaches to the rewards method:
     * 'game': Game score based approach. Gives scores to the action depending on how has the action affected the score
@@ -1380,17 +1699,17 @@ def compute_reward(game_finished, piece_locked, lines_cleared, lowest_position_f
         Game reward
         
         The reward computed is as follows:
-        * If the game is finished, REWARD = -10 (we don't want the agent to lose)
+        * If the game is finished, REWARD = -2 (we don't want the agent to lose)
         * If no piece has been locked: REWARD = -0.1 (we want the agent to act)
         * If a piece has been locked:
             * No line cleared, REWARD = (lowest_position_filled / 10) - 1 (locking pieces is good, the deeper the better)
               However, locking pieces above half of the stack height starts being penalized.
-            * Lines cleared, REWARD = +2^(lines_cleared + 1) (the more lines that are cleared at once, the better the state is)
+            * Lines cleared, REWARD = 2^lines_cleared (the more lines that are cleared at once, the better the state is)
         """
 
         # Game finished: immediate big penalty
         if game_finished:
-            return -10, None
+            return -2, None
         # Game not finished but piece not locked: very small penalty (want the agent to try to lock fast)
         elif not piece_locked:
             return -0.1, None
@@ -1401,7 +1720,7 @@ def compute_reward(game_finished, piece_locked, lines_cleared, lowest_position_f
                 return (lowest_position_filled / 10) - 1, None
             # 1 or more lines locked: give the agent a bigger reward (more lines = better reward)
             else:
-                return 2 ** (lines_cleared + 1), None
+                return 2 ** lines_cleared, None
     else:
         """
         Heuristic reward
@@ -1417,9 +1736,9 @@ def compute_reward(game_finished, piece_locked, lines_cleared, lowest_position_f
         score = -0.51 * (aggregate height) + 0.76 * (lines) - 0.36 * (holes) - 0.18 * (bumpiness)
         
         The reward will be:
-        * If there is a game over, REWARD = -10 (harsh penalty for losing the game)
+        * If there is a game over, REWARD = -2 (harsh penalty for losing the game)
         * If no lines were cleared, REWARD = (current score) - (previous score) (the difference in scores)
-        * If a line was cleared, REWARD = +2^(lines_cleared + 1) (big reward for line clears)
+        * If a line was cleared, REWARD = 2^lines_cleared (big reward for line clears)
         """
 
         # Check for cases where computing the reward is not needed
@@ -1428,10 +1747,10 @@ def compute_reward(game_finished, piece_locked, lines_cleared, lowest_position_f
 
         if game_finished:
             # Game finished: return a big negative reward
-            return -10, None
+            return -2, None
         elif lines_cleared > 0:
             # Lines have been cleared: return a positive reward depending on the amount of cleared lines
-            return 2 ** (lines_cleared + 1), None
+            return 2 ** lines_cleared, None
         else:
             # Compute the score
             current_state_score = compute_heuristic_state_score(locked_pieces, current_piece, piece_locked)
@@ -1447,13 +1766,84 @@ def compute_reward(game_finished, piece_locked, lines_cleared, lowest_position_f
             return reward, current_state_score
 
 
+def compute_reward_new(game_finished, lines_cleared, original_score, new_score, lowest_position_filled):
+    """
+    Computes the reward for a pair of state, action (where action is contained within reached_state)
+
+    This method is only used for "new" agents
+
+    Both a heuristic and game approach are used for the rewards. However, the game approach has been modified
+    to take into account the new actions.
+
+    :param game_finished: TRUE if the action made the game end, FALSE otherwise
+    :param lines_cleared: Amount of lines that have been cleared by the action
+    :param original_score: Score given to the original state
+    :param new_score: Score given to the state reached after applying the action
+    :param lowest_position_filled: The lowest position filled by the piece (on the Y axis)
+
+    :return: The reward given to the current state
+    """
+
+    if rewards_method == "game":
+        """
+        Game reward
+        
+        In this case, the reward is based directly on the score obtained by the agent by placing pieces,
+        but slightly modified to better suit the rewards
+        
+        To be precise, the reward will be:
+        * If there is a game over, REWARD = -2 (harsh penalty for losing the game)
+        * If no lines were cleared, REWARD = (lowest_position_filled / 10) - 1 (from +1 at the lowest depth 
+                                                                                to -1 at the highest depth)
+        * If a line was cleared, REWARD = 2^lines_cleared (big reward for line clears)
+        """
+        if game_finished:
+            # Game finished: return a big negative reward
+            return -2
+        elif lines_cleared > 0:
+            # Lines have been cleared: return a positive reward depending on the amount of cleared lines
+            return 2 ** lines_cleared
+        else:
+            # No lines have been cleared: small reward (placing the piece lower is more valuable)
+            return (lowest_position_filled / 10) - 1
+
+    else:
+        """
+        Heuristic reward
+    
+        The game will take into account the following values (after the action has already applied, and assuming that
+        the piece would instantly fall down at the current position with the current rotation):
+        - Total aggregate height of the board
+        - Number of lines that would be cleared
+        - Number of covered holes that would exist
+        - Bumpiness (aggregate of height differences between columns)
+    
+        A state will be scored with the following formula:
+        score = -0.51 * (aggregate height) + 0.76 * (lines) - 0.36 * (holes) - 0.18 * (bumpiness)
+    
+        The reward will be:
+        * If there is a game over, REWARD = -2 (harsh penalty for losing the game)
+        * If no lines were cleared, REWARD = (current score) - (previous score) (the difference in scores)
+        * If a line was cleared, REWARD = 2^lines_cleared (big reward for line clears)
+        """
+
+        if game_finished:
+            # Game finished: return a big negative reward
+            return -2
+        elif lines_cleared > 0:
+            # Lines have been cleared: return a positive reward depending on the amount of cleared lines
+            return 2 ** lines_cleared
+        else:
+            # No lines have been cleared: the reward is the difference in evaluation between the new and the previous score
+            return new_score - original_score
+
+
 ###############################
 # MAIN LOOP AUXILIARY METHODS #
 ###############################
 
 # These methods are the main loop methods shared between all instances of the main game loop
 # (human player, AI player or AI learner)
-# TODO REVISA ESTOS METODOS JULIA A VER QUE TE PARECE
 
 def initialize_game():
     """
@@ -1724,10 +2114,13 @@ def main_human_player(win):
             draw_game_over_effect(win)
             run = False
 
+# ORIGINAL APPROACH ("OLD") #
+# This approach considers an action as a player input
 
-def main_ai_player(win):
+
+def main_ai_player_old(win):
     """
-    Main logic of the game when a AI player is active
+    Main logic of the game when a AI player (using an "old" approach agent) is active
 
     The main differences are that the actions are now polled from the agent instead of from the user inputs
     Once the game is finished, the score will be displayed on the console
@@ -1837,7 +2230,7 @@ def main_ai_player(win):
 
                 # Draw the screen first (to ensure the piece is displayed on its proper place) and then draw the effect
                 draw_manager(win, grid, current_piece, next_piece, score, level, lines - len(lines_cleared))
-                draw_ai_player_information(win, current_state, q_values, action, agent.actions_performed)
+                draw_ai_player_old_information(win, current_state, q_values, action, agent.actions_performed)
                 draw_clear_row(win, lines_cleared)
 
             # Update the score
@@ -1848,7 +2241,7 @@ def main_ai_player(win):
 
         # Draw everything (original HUD and AI HUD)
         draw_manager(win, grid, current_piece, next_piece, score, level, lines)
-        draw_ai_player_information(win, current_state, q_values, action, agent.actions_performed)
+        draw_ai_player_old_information(win, current_state, q_values, action, agent.actions_performed)
         # Update the screen
         pygame.display.flip()
 
@@ -1859,6 +2252,10 @@ def main_ai_player(win):
             draw_game_over_effect(win)
             run = False
 
+        # If the agent has cleared more than the specified amount, cut it short
+        if lines >= max_lines_training:
+            run = False
+
     # Game has ended: print results
     print("END RESULTS: ")
     print("Lines: " + str(lines))
@@ -1866,9 +2263,9 @@ def main_ai_player(win):
     print("Actions taken: " + str(agent.actions_performed))
 
 
-def main_ai_learn(win):
+def main_ai_learn_old(win):
     """
-    Main logic of the game when the AI is in learning mode
+    Main logic of the game when the AI (using an "old" mode agent) is in learning mode
 
     This method has several differences compared to the standard AI player loop:
     - The game automatically replays itself after every epoch
@@ -2030,18 +2427,18 @@ def main_ai_learn(win):
                     # Draw the screen first (to ensure the piece is displayed on its proper place) and then draw the effect
                     if not fast_training:
                         draw_manager(win, grid, current_piece, next_piece, score, level, lines - len(lines_cleared))
-                        draw_ai_learn_information(win,
-                                                  hud_current_state,
-                                                  hud_next_state,
-                                                  hud_action,
-                                                  hud_reward,
-                                                  current_epoch,
-                                                  agent.actions_performed,
-                                                  agent.epsilon,
-                                                  best_epoch,
-                                                  best_score,
-                                                  best_lines,
-                                                  best_actions)
+                        draw_ai_learn_old_information(win,
+                                                      hud_current_state,
+                                                      hud_next_state,
+                                                      hud_action,
+                                                      hud_reward,
+                                                      current_epoch,
+                                                      agent.actions_performed,
+                                                      agent.epsilon,
+                                                      best_epoch,
+                                                      best_score,
+                                                      best_lines,
+                                                      best_actions)
                         draw_clear_row(win, lines_cleared)
 
                 # Update the score
@@ -2060,13 +2457,13 @@ def main_ai_learn(win):
                 # State reached after the action
                 new_state = generate_state(locked_positions, current_piece)
                 # Reward for the state/action pair
-                reward, previous_state_score = compute_reward(not run,
-                                                              final_state,
-                                                              lines_cleared_store,
-                                                              lowest_y,
-                                                              current_piece,
-                                                              locked_positions,
-                                                              previous_state_score)
+                reward, previous_state_score = compute_reward_old(not run,
+                                                                  final_state,
+                                                                  lines_cleared_store,
+                                                                  lowest_y,
+                                                                  current_piece,
+                                                                  locked_positions,
+                                                                  previous_state_score)
 
                 # Store the experience into the agent
                 agent.insert_experience(current_state, action, reward, new_state, final_state)
@@ -2087,24 +2484,468 @@ def main_ai_learn(win):
             # Draw everything (original HUD and AI HUD) IF not in fast mode
             if not fast_training:
                 draw_manager(win, grid, current_piece, next_piece, score, level, lines)
-                draw_ai_learn_information(win,
-                                          hud_current_state,
-                                          hud_next_state,
-                                          hud_action,
-                                          hud_reward,
-                                          current_epoch,
-                                          agent.actions_performed,
-                                          agent.epsilon,
-                                          best_epoch,
-                                          best_score,
-                                          best_lines,
-                                          best_actions)
+                draw_ai_learn_old_information(win,
+                                              hud_current_state,
+                                              hud_next_state,
+                                              hud_action,
+                                              hud_reward,
+                                              current_epoch,
+                                              agent.actions_performed,
+                                              agent.epsilon,
+                                              best_epoch,
+                                              best_score,
+                                              best_lines,
+                                              best_actions)
                 # Update the screen
                 pygame.display.flip()
 
             # If the agent has cleared more than the specified amount, cut it short
             if lines >= max_lines_training:
                 run = False
+
+        # GAME END
+
+        # Advance to the next epoch
+        current_epoch += 1
+
+        # Notify the agent of the new epoch
+        agent.finish_epoch(lines, score)
+
+
+# SECOND APPROACH ("NEW") #
+# This approach considers all posible final positions of a piece as actions
+
+def main_ai_player_new(win):
+    """
+    Main logic of the game when a AI player (using a "new" approach agent) is active
+
+    In addition to the main game loop, an extra pre-loop is added.
+    In this pre-loop, the action and sequence of steps performed by the agent is computed.
+    This will later be used during the main game loop itself.
+
+    :param win: Surface used to draw all the elements.
+    """
+
+    # Initialize all necessary variables
+    (locked_positions, _, score, lines, level, change_piece, run, randomizer_shapes, current_piece,
+     next_piece, clock, fall_time) = initialize_game()
+
+    # Current speed will be fixed to the specified value (and not updated)
+    current_speed = game_speed_ai
+
+    # AI: Poll time is used to check for the AI player actions
+    poll_time = 0
+
+    # HUD-RELATED - Store the last "step" taken while in the loop
+    # Outside of the run loop to avoid the value being crushed while doing a new action
+    last_step = None
+
+    # While the game is not over (main logic loop)
+    while run:
+
+        # PRE-LOOP
+        # Generate all possible actions for the current state and pieces
+        possible_actions = generate_possible_actions(locked_positions, current_piece)
+
+        # Choose an action from the agent (and store the Q-Value)
+        action, q_value = agent.act(possible_actions)
+
+        # Generate the steps to be taken while in-game
+        steps = generate_movement_sequence(action, current_piece)
+
+        # Bool used to keep track of when the game loop should yield (to compute the next action)
+        loop_ended = False
+
+        # Tick the clock (to "ignore" time lost during computations)
+        clock.tick()
+
+        # GAME LOOP
+        # The game loop will run until either the game is over, all steps have been taken or
+        # the piece has been locked inside. This will be controled by a variable outside
+        while not loop_ended:
+
+            # Create the grid and update all the clocks, marking a new tick
+            grid = create_grid(locked_positions)
+            fall_time += clock.get_rawtime()
+            poll_time += clock.get_rawtime()
+            clock.tick()
+
+            # Unless specified otherwise, the piece is not going to be locked
+            change_piece = False
+
+            # Check if the player has exited the game or has pressed the ESC key
+            for event in pygame.event.get():
+
+                # Window has been closed
+                if event.type == pygame.QUIT:
+                    pygame.display.quit()
+                    pygame.quit()
+                    sys.exit()
+
+                # Key has been pressed
+                if event.type == pygame.KEYDOWN:
+
+                    # ESC key (exit to main menu)
+                    if event.key == pygame.K_ESCAPE:
+                        run = False
+                        stop_sounds()
+
+            # Clock calculations
+            # The order of these calculations is relevant. The movement must always be polled first
+            # This ensures it remains consistent with the human behaviour (movement first, locking second)
+
+            # 1 - If needed, execute an action
+            if poll_time > polling_speed:
+                step = steps.popleft()
+                last_step = step
+                poll_time = 0
+                current_piece, grid, change_piece = process_inputs([step], current_piece, grid)
+
+                # Notify the agent
+                agent.notify_step()
+
+            # 2 - If needed, move the piece downwards
+            if fall_time > current_speed:
+                fall_time = 0
+                current_piece.y += 1
+                if not valid_space(current_piece, grid) and current_piece.y > 0:
+                    current_piece.y -= 1
+                    change_piece = True
+
+            # Place the current piece into the grid
+            grid, shape_pos = place_piece(current_piece, grid)
+
+            # If the piece has been locked in place
+            if change_piece:
+                # Add the current piece to locked positions (conserving the biggest y value)
+                shape_y = -1
+                for pos in shape_pos:
+                    if pos[1] > shape_y:
+                        shape_y = pos[1]
+                    p = (pos[0], pos[1])
+                    locked_positions[p] = current_piece.color
+
+                # Get the next piece
+                current_piece = next_piece
+                next_piece, randomizer_shapes = get_shape(randomizer_shapes)
+
+                # Update lines
+                lines_cleared = clear_rows(grid, locked_positions)
+                lines += len(lines_cleared)
+
+                # Compute the score increase
+                score_increase = compute_score(len(lines_cleared), shape_y, level)
+
+                # Update level (speed is not increased in AI mode)
+                level = lines // 10
+
+                # Play the piece lock sound
+                play_sound("fall")
+
+                # Check if a line animation has to be played
+                if len(lines_cleared) > 0:
+                    # Play the appropriate sound. Sound is played before the effect is drawn to ensure it's not delayed
+                    play_sound("line")
+
+                    # Draw the screen first (to ensure the piece is displayed on its proper place) and then draw the effect
+                    draw_manager(win, grid, current_piece, next_piece, score, level, lines - len(lines_cleared))
+                    draw_ai_player_new_information(win,
+                                                   action[2],
+                                                   q_value,
+                                                   last_step,
+                                                   agent.actions_performed,
+                                                   agent.displacements)
+                    draw_clear_row(win, lines_cleared)
+
+                # Update the score
+                score += score_increase
+
+                # End the loop (to continue with either the pre-loop or finish the game)
+                loop_ended = True
+
+                # Prepare everything for the next loop
+                clock.tick()
+
+            # Draw everything (original HUD and AI HUD)
+            draw_manager(win, grid, current_piece, next_piece, score, level, lines)
+            draw_ai_player_new_information(win,
+                                           action[2],
+                                           q_value,
+                                           last_step,
+                                           agent.actions_performed,
+                                           agent.displacements)
+            # Update the screen
+            pygame.display.flip()
+
+            # Check if the game has ended
+            if check_defeat(locked_positions):
+                stop_sounds()
+                play_sound("lost")
+                draw_game_over_effect(win)
+                run = False
+                loop_ended = True
+
+            # If the agent has cleared more than the specified amount, cut it short
+            if lines >= max_lines_training:
+                run = False
+                loop_ended = True
+
+            # Check if the queue is empty
+            if len(steps) <= 0:
+                loop_ended = True
+
+    # Game has ended: print results
+    print("END RESULTS: ")
+    print("Lines: " + str(lines))
+    print("Score: " + str(score))
+    print("Actions taken: " + str(agent.actions_performed))
+
+
+def main_ai_learn_new(win):
+    """
+        Main logic of the game when the AI (using a "new" approach agent) is in learning mode
+
+        This method has several differences compared to the standard AI player loop:
+            - The game automatically replays itself after every epoch
+            - The game can run either on a real clock or a logical clock (when running in fast mode)
+
+        :param win: Surface used to draw all the elements.
+        """
+
+    # Initialize the epoch counter
+    current_epoch = 1
+
+    # Store info about the best epoch (used to display it)
+    best_epoch = -1
+    best_score = 0
+    best_lines = 0
+    best_actions = 0
+    best_steps = 0
+
+    # Game is played until the max epoch is readched
+    while current_epoch <= total_epochs:
+
+        # GAME START:
+
+        # Initialize all necessary variables
+        (locked_positions, _, score, lines, level, change_piece, run, randomizer_shapes, current_piece,
+         next_piece, clock, fall_time) = initialize_game()
+
+        # Current speed will be fixed to the specified value (and not updated)
+        current_speed = game_speed_ai
+
+        # AI: Poll time is used to check for the AI player actions
+        poll_time = 0
+
+        # While the game is not over (main logic loop)
+        while run:
+
+            # PRE-LOOP
+            # Generate all possible actions for the current state and pieces
+            possible_actions = generate_possible_actions(locked_positions, current_piece)
+
+            # Choose an action from the agent (and store the Q-Value)
+            action, q_value = agent.act(possible_actions)
+
+            # Generate the steps to be taken while in-game
+            steps = generate_movement_sequence(action, current_piece)
+
+            # Bool used to keep track of when the game loop should yield (to compute the next action)
+            loop_ended = False
+
+            # TRAINING RELATED VARIABLES:
+            # Compute the initial state and score
+            initial_state = generate_state(locked_positions, current_piece)
+            initial_score = compute_heuristic_state_score(locked_positions, current_piece, False)
+
+            # Store the final state and the reward obtained
+            final_state = action[2]
+            final_score = None
+
+            # Store the last amount of lines cleared
+            final_lines_cleared = 0
+
+            # Store the depth at which the piece was locked
+            final_piece_depth = 0
+
+            # Tick the clock (to "ignore" time lost during computations)
+            clock.tick()
+
+            # GAME LOOP
+            # The game loop will run until either the game is over, all steps have been taken or
+            # the piece has been locked inside. This will be controled by a variable outside
+            while not loop_ended:
+
+                # Create the grid
+                grid = create_grid(locked_positions)
+
+                # Check if fast mode is active
+                # NOT ACTIVE: The real-time clock is used
+                if not fast_training:
+                    fall_time += clock.get_rawtime()
+                    poll_time += clock.get_rawtime()
+                    clock.tick()
+                # ACTIVE: Automatically increase the counters by the polling speed
+                else:
+                    fall_time += polling_speed
+                    poll_time += polling_speed
+
+                # Unless specified otherwise, the piece is not going to be locked
+                change_piece = False
+
+                # Check if the player has exited the game or has pressed the ESC key
+                for event in pygame.event.get():
+
+                    # Window has been closed
+                    if event.type == pygame.QUIT:
+                        pygame.display.quit()
+                        pygame.quit()
+                        sys.exit()
+
+                # Clock calculations
+                # The order of these calculations is relevant. The movement must always be polled first
+                # This ensures it remains consistent with the human behaviour (movement first, locking second)
+
+                # 1 - If needed, execute an action
+                if poll_time > polling_speed:
+                    poll_time = 0
+                    current_piece, grid, change_piece = process_inputs([steps.popleft()], current_piece, grid)
+
+                    # Notify the agent of the step
+                    agent.notify_step()
+
+                # 2 - If needed, move the piece downwards
+                if fall_time > current_speed:
+                    fall_time = 0
+                    current_piece.y += 1
+                    if not valid_space(current_piece, grid) and current_piece.y > 0:
+                        current_piece.y -= 1
+                        change_piece = True
+
+                # Place the current piece into the grid
+                grid, shape_pos = place_piece(current_piece, grid)
+
+                # If the piece has been locked in place
+                if change_piece:
+                    # Add the current piece to locked positions (conserving the biggest y value)
+                    shape_y = -1
+                    for pos in shape_pos:
+                        if pos[1] > shape_y:
+                            shape_y = pos[1]
+                        p = (pos[0], pos[1])
+                        locked_positions[p] = current_piece.color
+
+                    # Store the depth
+                    final_piece_depth = shape_y
+
+                    # Compute the final state score and store it
+                    final_score = compute_heuristic_state_score(locked_positions, current_piece, True)
+
+                    # Get the next piece
+                    current_piece = next_piece
+                    next_piece, randomizer_shapes = get_shape(randomizer_shapes)
+
+                    # Update lines
+                    lines_cleared = clear_rows(grid, locked_positions)
+                    lines += len(lines_cleared)
+
+                    # Store the amount of cleared lines
+                    final_lines_cleared = len(lines_cleared)
+
+                    # Compute the score increase
+                    score_increase = compute_score(len(lines_cleared), shape_y, level)
+
+                    # Update level (speed is not increased in AI mode)
+                    level = lines // 10
+
+                    # Play the piece lock sound
+                    play_sound("fall")
+
+                    # Check if a line animation has to be played
+                    if len(lines_cleared) > 0:
+                        # Play the appropriate sound. Sound is played before the effect is drawn to ensure it's not delayed
+                        play_sound("line")
+
+                        # Draw the screen first (to ensure the piece is displayed on its proper place) and then draw the effect
+                        if not fast_training:
+                            draw_manager(win, grid, current_piece, next_piece, score, level, lines - len(lines_cleared))
+                            draw_ai_learn_new_information(win,
+                                                          current_epoch,
+                                                          initial_state,
+                                                          final_state,
+                                                          q_value,
+                                                          agent.actions_performed,
+                                                          agent.displacements,
+                                                          agent.epsilon,
+                                                          best_epoch,
+                                                          best_lines,
+                                                          best_score,
+                                                          best_actions,
+                                                          best_steps)
+                            draw_clear_row(win, lines_cleared)
+
+                    # Update the score
+                    score += score_increase
+
+                    # End the loop (to continue with either the pre-loop or finish the game)
+                    loop_ended = True
+
+                    # Prepare everything for the next loop
+                    clock.tick()
+
+                # Draw everything (original HUD and AI HUD)
+                if not fast_training:
+                    draw_manager(win, grid, current_piece, next_piece, score, level, lines)
+                    draw_ai_learn_new_information(win,
+                                                  current_epoch,
+                                                  initial_state,
+                                                  final_state,
+                                                  q_value,
+                                                  agent.actions_performed,
+                                                  agent.displacements,
+                                                  agent.epsilon,
+                                                  best_epoch,
+                                                  best_lines,
+                                                  best_score,
+                                                  best_actions,
+                                                  best_steps)
+                    # Update the screen
+                    pygame.display.flip()
+
+                # Check if the game has ended
+                if check_defeat(locked_positions):
+                    run = False
+                    loop_ended = True
+
+                # If the agent has cleared more than the specified amount, cut it short
+                if lines >= max_lines_training:
+                    run = False
+                    loop_ended = True
+
+                # Check if the queue is empty
+                if len(steps) <= 0:
+                    loop_ended = True
+
+            # POST-LOOP
+
+            # Obtain the reward
+            reward = compute_reward_new(run,
+                                        final_lines_cleared,
+                                        initial_score,
+                                        final_score,
+                                        final_piece_depth)
+
+            # Store the experience
+            agent.insert_experience(initial_state, reward, final_state, run)
+
+            # Check if the best epoch needs to be updated
+            if lines > best_lines or (lines == best_lines and score > best_score) or (
+                    lines == best_lines and score == best_score and agent.actions_performed > best_actions):
+                best_epoch = current_epoch
+                best_lines = lines
+                best_score = score
+                best_actions = agent.actions_performed
+                best_steps = agent.displacements
 
         # GAME END
 
@@ -2140,13 +2981,16 @@ def menu_logic(win):
                 # If escape is pressed, close the game
                 if event.key == pygame.K_ESCAPE:
                     run = False
-                # Else, start the appropriate game logic depending on the type of player
+                # Else, start the appropriate game logic depending on the type of player and the type of agent
                 else:
                     if not ai_player:
                         main_human_player(win)
                         pygame.event.clear()
                     else:
-                        main_ai_player(win)
+                        if agent.agent_type == "old":
+                            main_ai_player_old(win)
+                        else:
+                            main_ai_player_new(win)
                         pygame.event.clear()
 
     # When closed, exit everything in an ordered way
@@ -2206,12 +3050,20 @@ if __name__ == "__main__":
 
     # AGENT TYPE (-at or --agenttype) - Specifies the type of agent that will be used to play the game
     # Possible values:
-    # - 'standard_old' - (DEFAULT) The AI logic will be the standard DQL agent logic (with a basic neural network) for
-    #                    a classical Q-Learning approach (considering that each action => a movement of the piece)
+    # - 'standard_new'      (DEFAULT) The AI logic is the new approach used for DQL (considering that each action =>
+    #                       the final position of the piece)
+    # - 'prioritized_new'   A variation of the standard_new agent, where Prioritized Experience Replay is used
+    # - 'random_new'        A totally random agent using the new approach. Only usable in PLAY mode
+    # - 'standard_old'      The AI logic will be the standard DQL agent logic (with a basic neural network) for a
+    #                       classical Q-Learning approach, considering that each action is a movement of the piece
+    # - 'weighted_old'      A variation of the standard_old agent, that uses different weights when performing a
+    #                       random action
+    # - 'random_old'        A totally random agent using the old approach. Only usable in PLAY mode
 
     parser.add_argument('-at',
                         '--agenttype',
-                        choices=['standard_old', 'weighted_old', 'random_old'],
+                        choices=['standard_new', 'prioritized_new', 'random_new',
+                                 'standard_old', 'weighted_old', 'random_old'],
                         help="(AI ONLY) Sets the type of agent to be used. Note that agents with '-old' in the "
                              "name use the old, single-action based approach (action = actual game input), as opposed "
                              "to the approach used by the other agents (action = final position of the current piece). "
@@ -2261,7 +3113,7 @@ if __name__ == "__main__":
     # Possible values:
     # - 'game': Method based directly on game score (the reward is based on the score increase of the action)
     # - 'heuristic': Method based on the quality of the board after applying an action
-    # All heuristics are properly defined within the compute_reward function
+    # All heuristics are properly defined within the compute_reward_old function
 
     parser.add_argument('-rw',
                         '--reward',
@@ -2448,7 +3300,18 @@ if __name__ == "__main__":
             epsilon_decay = 0
 
         # Instantiate the appropriate agent
-        if agent_type == 'standard_old':
+        if agent_type == 'standard_new':
+            agent = dql_agent_new.DQLAgentNew(learning_rate,
+                                              gamma,
+                                              epsilon,
+                                              epsilon_decay,
+                                              minimum_epsilon,
+                                              batch_size,
+                                              total_epochs,
+                                              experience_replay_size,
+                                              seed,
+                                              rewards_method)
+        elif agent_type == 'standard_old':
             agent = dql_agent_old.DQLAgentOld(learning_rate,
                                               gamma,
                                               epsilon,
@@ -2477,8 +3340,11 @@ if __name__ == "__main__":
     if ai_learning:
         # Before starting training, prepare the training structure
         agent.initialize_learning_structure()
-        # Start the main train loop
-        main_ai_learn(win)
+        # Start the appropiate main train loop
+        if agent.agent_type == "old":
+            main_ai_learn_old(win)
+        else:
+            main_ai_learn_new(win)
     # Otherwise, launch the main menu
     else:
         # If there is an agent, try to load the weights

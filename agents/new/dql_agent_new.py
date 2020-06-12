@@ -35,7 +35,7 @@ class DQLAgentNew:
     """
 
     def __init__(self, learning_rate, gamma, epsilon, epsilon_decay, minimum_epsilon,
-                 batch_size, total_epochs, experience_replay_size, seed):
+                 batch_size, total_epochs, experience_replay_size, seed, rewards_method):
         """
         Constructor of the class. Creates an agent from the specified information
 
@@ -48,6 +48,7 @@ class DQLAgentNew:
         :param total_epochs: Total amount of epochs that will be performed
         :param experience_replay_size: The maximum size of the experience replay
         :param seed: Seed to be used for all random choices. If None, a random seed will be used
+        :param rewards_method: Method used to compute the reward. Only used to differentiate when storing results
         """
 
         # Store variables related to DQL
@@ -55,7 +56,6 @@ class DQLAgentNew:
         self.epsilon = epsilon
         self.epsilon_decay = epsilon_decay
         self.minimum_epsilon = minimum_epsilon
-        print(self.epsilon_decay)
 
         # Creates the experience replay container
         # A deque is used to have a queue (oldest experiences in the experience replay go out first)
@@ -83,6 +83,9 @@ class DQLAgentNew:
         # Store the total epochs to be performed
         self.total_epochs = total_epochs
 
+        # Store the rewards method being used
+        self.rewards_method = rewards_method
+
         # Internal variables #
 
         # Remember the initial epsilon
@@ -101,6 +104,9 @@ class DQLAgentNew:
         # Compute the class and file name (used to store results)
         self.class_name = self.__class__.__name__
         self.folder_name = "g" + str(self.gamma) + "eps" + str(self.initial_epsilon) + "seed" + str(self.seed) + "epo" + str(self.total_epochs) + "rew" + self.rewards_method
+
+        # Keep track of the steps taken (displacements to the piece)
+        self.displacements = 0
 
     # Internal methods
 
@@ -148,7 +154,7 @@ class DQLAgentNew:
 
         # Output layer has 1 neuron (the score of the current state)
         # Activation function is linear
-        output_layer = Dense(len(self.actions),
+        output_layer = Dense(1,
                              activation="linear",
                              kernel_initializer=glorot_uniform(seed=self.seed))
 
@@ -188,10 +194,10 @@ class DQLAgentNew:
 
         # Generate a list with all states and next states (in order)
         states = [x[0] for x in batch]
-        next_states = [x[3] for x in batch]
+        next_states = [x[2] for x in batch]
 
-        # Batch predict the Q-Values for the original states (using the Q-Network)
-        states_predictions = self.q_network.predict(np.array(states), batch_size=self.batch_size, verbose=0)
+        # Create a list to store the predictions
+        states_predictions = []
 
         # Batch predict the Q-Values for the next states (using the Target Network)
         next_states_predictions = self.target_network.predict(np.array(next_states), batch_size=self.batch_size, verbose=0)
@@ -206,10 +212,10 @@ class DQLAgentNew:
             # Check if the experience was a final one
             if terminated:
                 # Final state - The Q-value is only considered as a reward
-                states_predictions[i] = reward
+                states_predictions.append(reward)
             else:
                 # Not a final state - We need to consider the max Q value in the next state
-                states_predictions[i] = reward + self.gamma * next_states_predictions[i]
+                states_predictions.append(reward + self.gamma * next_states_predictions[i])
 
         # Batch train the network
         self.q_network.fit(np.array(states), np.array(states_predictions), batch_size=self.batch_size, epochs=1, verbose=0)
@@ -224,12 +230,16 @@ class DQLAgentNew:
                  (x_position, rotation, state)
         :return: action_taken, q-value
                  WHERE
-                 action_taken: The action taken, passed as (x_position, rotation)
-                 q-value: (ONLY IF APPLICABLE) The q-value (score) given to the action
+                 action_taken: The action taken, passed as (x_position, rotation, state)
+                 q-value: The q-value (score) given to the action
         """
 
         # Count the action
         self.actions_performed += 1
+
+        # Prepare the states for the network and pass them in batch
+        states = [x[2] for x in actions]
+        q_values = self.q_network.predict(np.array(states), batch_size=len(actions), verbose=0)
 
         # Generate a random number
         random_chance = np.random.rand()
@@ -237,24 +247,25 @@ class DQLAgentNew:
         # Check if the value is smaller (random action) or greater (optimal action) than epsilon
         if random_chance < self.epsilon:
             # Directly take a random action from the list of actions
-            # No Q-Value will be returned (as none is computed)
+            action = np.random.choice(np.arange(0, len(actions)))
+            # Find the appropriate Q-value
+            q_value = q_values[action]
 
-            x_position, rotation, _ = np.random.choice(actions)
-            return (x_position, rotation), None
+            return actions[action], q_value
 
         else:
-
-            # Prepare all states and pass them through the network in batch
-            states = [x[2] for x in actions]
-            q_values = self.q_network.predict(np.array(states), batch_size=len(actions), epochs=1, verbose=0)
-
             # Find the best action
             best_action_id = np.argmax(q_values)
-            return (actions[best_action_id][0], actions[best_action_id][1]), q_values[best_action_id]
+            # Find the appropriate Q-value
+            q_value = q_values[best_action_id]
+
+            return actions[best_action_id], q_value
 
     def insert_experience(self, state, reward, next_state, terminated):
         """
         Creates an experience and stores it into the replay memory of the agent
+
+        The agent is trained after inserting the experience with a mini batch
 
         Note that no actions are stored into the replay memory. This is because the action is implicitly stored
         within the next state (since actions are the final positions of the pieces)
@@ -267,6 +278,9 @@ class DQLAgentNew:
 
         # Store everything as a tuple
         self.experience_replay.append((state, reward, next_state, terminated))
+
+        # Train the network
+        self._learn_from_replay()
 
     def initialize_learning_structure(self):
         """
@@ -319,6 +333,13 @@ class DQLAgentNew:
             self._update_target_network()
             print("Weights successfully loaded")
 
+    def notify_step(self):
+        """
+        Increases the counter of steps (displacements). Called by the loop every time a step is taken
+        """
+
+        self.displacements += 1
+
     def finish_epoch(self, lines, score):
         """
         Finishes the current epoch, updating all necessary values
@@ -336,14 +357,14 @@ class DQLAgentNew:
             self.epsilon = self.minimum_epsilon
 
         # Print the relevant info on the screen
-        print("EPOCH " + str(self.current_epoch) + " FINISHED (Lines: " + str(lines) + "/Score: " + str(score) + "/Actions: " +  str(self.actions_performed) + ")")
+        print("EPOCH " + str(self.current_epoch) + " FINISHED (Lines: " + str(lines) + "/Score: " + str(score) + "/Actions: " +  str(self.actions_performed) +"/Displacements: " + str(self.displacements) + ")")
 
         # Store the info for the current epoch into a CSV
         with open(join("results", self.class_name, self.folder_name, self.class_name + "_" + self.folder_name + "_data.csv"), 'a', newline='') as file:
             # Create the writer
             writer = csv.writer(file)
             # Insert the data
-            writer.writerow([self.current_epoch, score, lines, self.actions_performed])
+            writer.writerow([self.current_epoch, score, lines, self.displacements])
 
         # Store the weights into a folder (only every 10 epochs, to save size)
         if self.current_epoch % 10 == 0:
