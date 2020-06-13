@@ -374,6 +374,9 @@ class DQLAgentNew:
         # Reset the action counter
         self.actions_performed = 0
 
+        # Reset the displacement counter
+        self.displacements = 0
+
         # Update the epoch
         self.current_epoch += 1
 

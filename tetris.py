@@ -60,7 +60,7 @@ import numpy as np
 
 # Import used for our own agent scripts
 from agents.old import dql_agent_old, weighted_agent_old, random_agent_old
-from agents.new import dql_agent_new
+from agents.new import dql_agent_new, prioritized_agent_new, random_agent_new
 
 import pygame
 
@@ -1792,7 +1792,7 @@ def compute_reward_new(game_finished, lines_cleared, original_score, new_score, 
         but slightly modified to better suit the rewards
         
         To be precise, the reward will be:
-        * If there is a game over, REWARD = -2 (harsh penalty for losing the game)
+        * If there is a game over, REWARD = -1 (penalty for losing the game)
         * If no lines were cleared, REWARD = (lowest_position_filled / 10) - 1 (from +1 at the lowest depth 
                                                                                 to -1 at the highest depth)
         * If a line was cleared, REWARD = 2^lines_cleared (big reward for line clears)
@@ -2929,14 +2929,14 @@ def main_ai_learn_new(win):
             # POST-LOOP
 
             # Obtain the reward
-            reward = compute_reward_new(run,
+            reward = compute_reward_new(not run,
                                         final_lines_cleared,
                                         initial_score,
                                         final_score,
                                         final_piece_depth)
 
             # Store the experience
-            agent.insert_experience(initial_state, reward, final_state, run)
+            agent.insert_experience(initial_state, reward, final_state, not run)
 
             # Check if the best epoch needs to be updated
             if lines > best_lines or (lines == best_lines and score > best_score) or (
@@ -3311,6 +3311,19 @@ if __name__ == "__main__":
                                               experience_replay_size,
                                               seed,
                                               rewards_method)
+        elif agent_type == 'prioritized_new':
+            agent = prioritized_agent_new.PrioritizedAgentNew(learning_rate,
+                                                              gamma,
+                                                              epsilon,
+                                                              epsilon_decay,
+                                                              minimum_epsilon,
+                                                              batch_size,
+                                                              total_epochs,
+                                                              experience_replay_size,
+                                                              seed,
+                                                              rewards_method)
+        elif agent_type == 'random_new':
+            agent = random_agent_new.RandomAgentNew(seed)
         elif agent_type == 'standard_old':
             agent = dql_agent_old.DQLAgentOld(learning_rate,
                                               gamma,
