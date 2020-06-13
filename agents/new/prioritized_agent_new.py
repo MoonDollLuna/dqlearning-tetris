@@ -64,18 +64,15 @@ class PrioritizedAgentNew(DQLAgentNew):
         DQLAgentNew.__init__(self, learning_rate, gamma, epsilon, epsilon_decay, minimum_epsilon,
                              batch_size, total_epochs, experience_replay_size, seed, rewards_method)
 
-        # Set alpha and beta
+        # Set alpha and beta (both fixed)
         self.alpha = 0.5
-        self.beta = 0.4
+        self.beta = 0.5
 
         # Keep track of the insertion order (used to ensure that the sort is stable)
         self.insertion = 0
 
         # Keep the last sorted list to access it outside
         self.sorted_queue = None
-
-        # Compute the beta increment to ensure that beta reaches 1 after 75% of epochs
-        self.beta_increment = (1 - 0.4) / (total_epochs * 0.75)
 
     # Internal methods
     def insert_experience(self, state, reward, next_state, terminated):
@@ -103,6 +100,9 @@ class PrioritizedAgentNew(DQLAgentNew):
 
         # Store the experience as a tuple
         self.experience_replay.append((float('inf'), self.insertion, experience))
+
+        # Increase the insertion counter
+        self.insertion += 1
 
         # Create the ordered queue
         self.sorted_queue = sorted(self.experience_replay, key=lambda order: (order[0], order[1]), reverse=True)
@@ -140,13 +140,15 @@ class PrioritizedAgentNew(DQLAgentNew):
 
         # Sample the sorted experience replay using the weights
         # Sampling without replacement is used
-        print(self.sorted_queue)
 
-        batch = np.random.choice(self.sorted_queue, size, False, probabilities)
+        batch_ids = np.random.choice(np.arange(0, len(self.sorted_queue)), size, False, probabilities)
+        batch = []
+        for id in batch_ids:
+            batch.append(self.sorted_queue[id])
 
         # Generate a list with all states and next states (in batch order)
-        states = [x[0] for x in batch]
-        next_states = [x[2] for x in batch]
+        states = [x[2][0] for x in batch]
+        next_states = [x[2][2] for x in batch]
 
         # Create a list to store the predictions
         states_predictions = []
@@ -163,8 +165,8 @@ class PrioritizedAgentNew(DQLAgentNew):
         for i in range(len(states)):
             # Grab the missing values from the batch
             # Batch structure = (state, reward, next_state, terminated)
-            reward = batch[i][1]
-            terminated = batch[i][3]
+            reward = batch[i][2][1]
+            terminated = batch[i][2][3]
 
             # Check if the experience was a final one
             if terminated:
@@ -176,7 +178,7 @@ class PrioritizedAgentNew(DQLAgentNew):
 
             # Compute the error with the weight
             weight = ((1 / len(self.experience_replay)) * (1/probabilities[i])) ** self.beta
-            errors.append((current_predictions[i] - new_value) ** 2)
+            errors.append(((current_predictions[i] - new_value) ** 2)[0])
             weighted_change = weight * new_value
 
             # Append the weighted change
@@ -189,10 +191,13 @@ class PrioritizedAgentNew(DQLAgentNew):
 
         # After training the network, update the experiences already in the queue
         for experience in range(len(batch)):
-            # Find the experience in the queue
-            exp_id = self.experience_replay.index(batch[experience])
+            # Try to find the experience in the queue
+            try:
+                exp_id = self.experience_replay.index(batch[experience])
 
-            # Update the error
-            self.experience_replay[exp_id][0] = errors[experience]
-
-
+                # Update the error
+                self.experience_replay[exp_id] = (errors[experience], self.experience_replay[exp_id][1], self.experience_replay[exp_id][2])
+            except:
+                # In case of any value mysteriously vanishing in the queue, check the exception
+                # (and ignore it)
+                pass
