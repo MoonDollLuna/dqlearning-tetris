@@ -26,6 +26,13 @@ n = 20
 b = [1.0 / n] * n
 a = 1
 
+
+# AUXILIAR METHODS #
+
+def roundup_to_tens(number):
+    """Rounds a number to the tens"""
+    return int(math.ceil(number / 10.0)) * 10
+
 # MAIN SCRIPT #
 
 # Create the argparser
@@ -104,7 +111,7 @@ for elements in files_loaded:
 # LINES:
 
 # Create the figure
-plt.figure(figsize=(12,8))
+plt.figure(figsize=(10, 6))
 
 # Zip and start adding lines
 for (legend_name, internal_epochs), (_, internal_lines) in zip(epochs, lines):
@@ -132,7 +139,7 @@ print("Lines plot stored")
 # This plot is created since the original plot is mostly useless with how few lines there are
 
 # Create the figure
-plt.figure(figsize=(12,8))
+plt.figure(figsize=(12, 6))
 
 # Prepare the groups and bars
 names = []
@@ -148,8 +155,8 @@ plt.bar(names, values)
 # Add the axes titles
 plt.ylabel('Lineas eliminadas (total)')
 # Fix the Y axis (use only ints)
-max_val = math.ceil(max(values))+1
-plt.yticks(range(0, max_val))
+max_val = roundup_to_tens(max(values)) + 10
+plt.yticks(range(0, max_val, 10))
 
 # Store the figure
 plt.savefig('lineas_totales.png', bbox_inches='tight', dpi=1200)
@@ -159,7 +166,7 @@ print("Total lines plot stored")
 # SCORE (UNSMOOTHED):
 
 # Create the figure
-plt.figure(figsize=(12,8))
+plt.figure(figsize=(10, 6))
 
 # Zip and start adding lines
 for (legend_name, internal_epochs), (_, internal_scores) in zip(epochs, scores):
@@ -186,7 +193,7 @@ print("Scores plot (unsmoothed) stored")
 # SCORE (SMOOTHED):
 
 # Create the figure
-plt.figure(figsize=(12,8))
+plt.figure(figsize=(10, 6))
 
 # Zip and start adding lines
 for (legend_name, internal_epochs), (_, internal_scores) in zip(epochs, scores):
@@ -214,7 +221,7 @@ print("Scores plot (smoothed) stored")
 # ACTIONS TAKEN (UNSMOOTHED)
 
 # Create the figure
-plt.figure(figsize=(12, 8))
+plt.figure(figsize=(10, 6))
 
 # Zip and start adding lines
 for (legend_name, internal_epochs), (_, internal_actions) in zip(epochs, actions):
@@ -242,7 +249,7 @@ print("Actions taken plot (unsmoothed) stored")
 # ACTIONS TAKEN (SMOOTHED)
 
 # Create the figure
-plt.figure(figsize=(12, 8))
+plt.figure(figsize=(10, 6))
 
 # Zip and start adding lines
 for (legend_name, internal_epochs), (_, internal_actions) in zip(epochs, actions):

@@ -7,6 +7,7 @@
 # General imports
 import sys
 import numpy as np
+import random
 
 
 class RandomAgentNew:
@@ -30,7 +31,7 @@ class RandomAgentNew:
         # Store the seed and set it, if it has been provided.
         self.seed = seed
         if self.seed is not None:
-            np.random.seed(self.seed)
+            random.seed(seed)
 
         # Mark this agent as an NEW agent (using the new implementation, where ACTION = final position and rotation
         # of the piece)
@@ -67,7 +68,7 @@ class RandomAgentNew:
         self.actions_performed += 1
 
         # Select a random action from the actions list
-        return np.random.choice(actions), None
+        return random.choice(actions), "None"
 
     def load_weights(self, weights):
         """

@@ -28,6 +28,7 @@
 #               10Ca - AI Player main loop
 #               10Cb - AI Learner main loop
 #           10D - Main menu logic
+#           10E - Evaluation logic (for AI Players)
 #       11 - Main method
 #           11A - Argument definition
 #           11B - Argument parsing
@@ -60,7 +61,7 @@ import numpy as np
 
 # Import used for our own agent scripts
 from agents.old import dql_agent_old, weighted_agent_old, random_agent_old
-from agents.new import dql_agent_new, prioritized_agent_new, random_agent_new
+from agents.new import dql_agent_new, prioritized_agent_new, random_agent_new, eltetris_agent_new
 
 import pygame
 
@@ -280,6 +281,7 @@ seed = None
 #   * Standard (old): Standard DQL Agent using the original approach (action = player input)
 #   * Weighted (old): Variation of the Standard (old) agent using weights for the actions when randomly choosing them
 #   * Random (old): Agent exclusively used in Play mode. Acts randomly, serves as a baseline
+#   * El-Tetris: Deterministic agent using the El-Tetris algorithm to play. Acts as a baseline.
 # Set using --agenttype
 agent_type = 'standard_new'
 
@@ -2148,9 +2150,17 @@ def main_ai_player_old(win):
 
         # Create the grid and update all the clocks, marking a new tick
         grid = create_grid(locked_positions)
-        fall_time += clock.get_rawtime()
-        poll_time += clock.get_rawtime()
-        clock.tick()
+
+        # Check if fast mode is active
+        # NOT ACTIVE: The real-time clock is used
+        if not fast_training:
+            fall_time += clock.get_rawtime()
+            poll_time += clock.get_rawtime()
+            clock.tick()
+        # ACTIVE: automatically increase the counters by the polling speed
+        else:
+            fall_time += polling_speed
+            poll_time += polling_speed
 
         # Unless specified otherwise, the piece is not going to be locked
         change_piece = False
@@ -2229,9 +2239,10 @@ def main_ai_player_old(win):
                 play_sound("line")
 
                 # Draw the screen first (to ensure the piece is displayed on its proper place) and then draw the effect
-                draw_manager(win, grid, current_piece, next_piece, score, level, lines - len(lines_cleared))
-                draw_ai_player_old_information(win, current_state, q_values, action, agent.actions_performed)
-                draw_clear_row(win, lines_cleared)
+                if not fast_training:
+                    draw_manager(win, grid, current_piece, next_piece, score, level, lines - len(lines_cleared))
+                    draw_ai_player_old_information(win, current_state, q_values, action, agent.actions_performed)
+                    draw_clear_row(win, lines_cleared)
 
             # Update the score
             score += score_increase
@@ -2240,16 +2251,19 @@ def main_ai_player_old(win):
             clock.tick()
 
         # Draw everything (original HUD and AI HUD)
-        draw_manager(win, grid, current_piece, next_piece, score, level, lines)
-        draw_ai_player_old_information(win, current_state, q_values, action, agent.actions_performed)
-        # Update the screen
-        pygame.display.flip()
+        if not fast_training:
+            draw_manager(win, grid, current_piece, next_piece, score, level, lines)
+            draw_ai_player_old_information(win, current_state, q_values, action, agent.actions_performed)
+            # Update the screen
+            pygame.display.flip()
 
         # Check if the game has ended
         if check_defeat(locked_positions):
-            stop_sounds()
-            play_sound("lost")
-            draw_game_over_effect(win)
+            # Only play effects if the agent is not in fast mode
+            if not fast_training:
+                stop_sounds()
+                play_sound("lost")
+                draw_game_over_effect(win)
             run = False
 
         # If the agent has cleared more than the specified amount, cut it short
@@ -2261,6 +2275,8 @@ def main_ai_player_old(win):
     print("Lines: " + str(lines))
     print("Score: " + str(score))
     print("Actions taken: " + str(agent.actions_performed))
+
+    return lines, score
 
 
 def main_ai_learn_old(win):
@@ -2538,7 +2554,7 @@ def main_ai_player_new(win):
 
     # HUD-RELATED - Store the last "step" taken while in the loop
     # Outside of the run loop to avoid the value being crushed while doing a new action
-    last_step = None
+    last_step = "Default"
 
     # While the game is not over (main logic loop)
     while run:
@@ -2566,9 +2582,17 @@ def main_ai_player_new(win):
 
             # Create the grid and update all the clocks, marking a new tick
             grid = create_grid(locked_positions)
-            fall_time += clock.get_rawtime()
-            poll_time += clock.get_rawtime()
-            clock.tick()
+
+            # Check if fast mode is active
+            # NOT ACTIVE: The real-time clock is used
+            if not fast_training:
+                fall_time += clock.get_rawtime()
+                poll_time += clock.get_rawtime()
+                clock.tick()
+            # ACTIVE: automatically increase the counters by the polling speed
+            else:
+                fall_time += polling_speed
+                poll_time += polling_speed
 
             # Unless specified otherwise, the piece is not going to be locked
             change_piece = False
@@ -2648,14 +2672,15 @@ def main_ai_player_new(win):
                     play_sound("line")
 
                     # Draw the screen first (to ensure the piece is displayed on its proper place) and then draw the effect
-                    draw_manager(win, grid, current_piece, next_piece, score, level, lines - len(lines_cleared))
-                    draw_ai_player_new_information(win,
-                                                   action[2],
-                                                   q_value,
-                                                   last_step,
-                                                   agent.actions_performed,
-                                                   agent.displacements)
-                    draw_clear_row(win, lines_cleared)
+                    if not fast_training:
+                        draw_manager(win, grid, current_piece, next_piece, score, level, lines - len(lines_cleared))
+                        draw_ai_player_new_information(win,
+                                                       action[2],
+                                                       q_value,
+                                                       last_step,
+                                                       agent.actions_performed,
+                                                       agent.displacements)
+                        draw_clear_row(win, lines_cleared)
 
                 # Update the score
                 score += score_increase
@@ -2667,21 +2692,23 @@ def main_ai_player_new(win):
                 clock.tick()
 
             # Draw everything (original HUD and AI HUD)
-            draw_manager(win, grid, current_piece, next_piece, score, level, lines)
-            draw_ai_player_new_information(win,
-                                           action[2],
-                                           q_value,
-                                           last_step,
-                                           agent.actions_performed,
-                                           agent.displacements)
-            # Update the screen
-            pygame.display.flip()
+            if not fast_training:
+                draw_manager(win, grid, current_piece, next_piece, score, level, lines)
+                draw_ai_player_new_information(win,
+                                               action[2],
+                                               q_value,
+                                               last_step,
+                                               agent.actions_performed,
+                                               agent.displacements)
+                # Update the screen
+                pygame.display.flip()
 
             # Check if the game has ended
             if check_defeat(locked_positions):
-                stop_sounds()
-                play_sound("lost")
-                draw_game_over_effect(win)
+                if not fast_training:
+                    stop_sounds()
+                    play_sound("lost")
+                    draw_game_over_effect(win)
                 run = False
                 loop_ended = True
 
@@ -2699,6 +2726,8 @@ def main_ai_player_new(win):
     print("Lines: " + str(lines))
     print("Score: " + str(score))
     print("Actions taken: " + str(agent.actions_performed))
+
+    return lines, score
 
 
 def main_ai_learn_new(win):
@@ -2999,6 +3028,54 @@ def menu_logic(win):
     sys.exit()
 
 
+def ai_player_evaluation_loop():
+    """
+    Evaluates the AI player performance with five simulated games, done in succession.
+    After that, print the results on screen.
+
+    This mode is only used when --fast mode is active in AI Player mode,
+    and is only used for evaluation purposes.
+    """
+
+    # Store the results in appropriate variables
+    total_lines = 0
+    total_score = 0
+    # Actions can be accessed at the end
+
+    # Make the game silent
+    global sound_active
+    sound_active = False
+
+    # Loop ten times
+    for i in range(10):
+
+        # Execute the appropriate loop (depending on the agent approach)
+        if agent.agent_type == "old":
+            lines, score = main_ai_player_old(None)
+        else:
+            lines, score = main_ai_player_new(None)
+
+        # Increase the counters
+        total_lines += lines
+        total_score += score
+
+    # Obtain the appropriate actions
+    if agent.agent_type == "old":
+        actions = agent.actions_performed
+    else:
+        actions = agent.displacements
+
+    # Print the results
+    print("MEAN RESULTS (10 GAMES)")
+    print("Lines: " + str(total_lines / 10))
+    print("Score: " + str(total_score / 10))
+    print("Actions: " + str(actions / 10))
+
+    # After the loop ends, exit in an ordered way
+    pygame.quit()
+    sys.exit()
+
+
 # Code to be executed if called directly
 if __name__ == "__main__":
 
@@ -3059,11 +3136,13 @@ if __name__ == "__main__":
     # - 'weighted_old'      A variation of the standard_old agent, that uses different weights when performing a
     #                       random action
     # - 'random_old'        A totally random agent using the old approach. Only usable in PLAY mode
+    # - 'el-tetris'         A deterministic agent using the El-Tetris algorithm to play. Only usable in PLAY mode
 
     parser.add_argument('-at',
                         '--agenttype',
                         choices=['standard_new', 'prioritized_new', 'random_new',
-                                 'standard_old', 'weighted_old', 'random_old'],
+                                 'standard_old', 'weighted_old', 'random_old',
+                                 'el-tetris'],
                         help="(AI ONLY) Sets the type of agent to be used. Note that agents with '-old' in the "
                              "name use the old, single-action based approach (action = actual game input), as opposed "
                              "to the approach used by the other agents (action = final position of the current piece). "
@@ -3348,6 +3427,9 @@ if __name__ == "__main__":
                                                         rewards_method)
         elif agent_type == 'random_old':
             agent = random_agent_old.RandomAgentOld(seed)
+        elif agent_type == 'el-tetris':
+            agent = eltetris_agent_new.ElTetrisAgent()
+
 
     # If the game is in learning mode, directly launch the game (without the main menu)
     if ai_learning:
@@ -3363,4 +3445,9 @@ if __name__ == "__main__":
         # If there is an agent, try to load the weights
         if ai_player:
             agent.load_weights(weights)
-        menu_logic(win)
+
+        # Check if fast mode is active (to load the appropriate loop)
+        if fast_training:
+            ai_player_evaluation_loop()
+        else:
+            menu_logic(win)

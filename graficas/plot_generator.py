@@ -149,7 +149,7 @@ plt.bar(names, values)
 plt.ylabel('Lineas eliminadas (total)')
 # Fix the Y axis (use only ints)
 max_val = math.ceil(max(values))+1
-plt.yticks(range(0, max_val))
+plt.yticks(range(0, max_val + 5, 5))
 
 # Store the figure
 plt.savefig('lineas_totales.png', bbox_inches='tight', dpi=1200)
